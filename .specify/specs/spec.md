@@ -105,6 +105,8 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
   The algorithm only resolves one prefix mapping per context (the outermost divergence point). Nested symlinks outside that prefix are not translated.
 - What happens with path components that are empty strings or single dots?  
   Dot-components and empty components are treated as part of the raw path and are not specially handled by the prefix-matching logic; the OS-level `canonicalize` call handles their resolution.
+- What happens when a relative path (e.g., `../foo/bar.rs` or `src/main.rs`) is passed to `to_logical()` or `to_canonical()`?  
+  Relative paths are returned unchanged with no translation attempted. Prefix-matching operates exclusively on absolute paths; no implicit resolution against CWD is performed.
 - What happens on case-insensitive filesystems (macOS APFS)?  
   The library performs component-level comparison using the raw byte representation; callers on case-insensitive systems are responsible for normalising case before comparison if that behaviour is needed.
 
@@ -120,6 +122,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - **FR-006**: `LogicalPathContext` MUST expose a `to_canonical(&self, path: &Path) -> PathBuf` method that translates a logical path to its canonical equivalent using the stored mapping, or returns the input unchanged if no mapping applies or validation fails.
 - **FR-007**: Both `to_logical()` and `to_canonical()` MUST execute the Validate step (round-trip `canonicalize(translated) == canonicalize(original)`) before returning a translated path.
 - **FR-008**: Both `to_logical()` and `to_canonical()` MUST return the input path unchanged (fall back) when: the context has no active mapping, the path does not begin with the relevant prefix, or the Validate step fails.
+- **FR-008a**: Both `to_logical()` and `to_canonical()` MUST return relative paths unchanged with no translation attempted. Only absolute paths are eligible for prefix-matching and translation.
 - **FR-009**: No public API function MUST panic or return an unrecoverable error due to symlink-resolution state, missing environment variables, or non-UTF-8 path bytes.
 - **FR-009a**: `LogicalPathContext` MUST expose an `is_active() -> bool` method that returns `true` when an active prefix mapping exists and `false` otherwise. No accessor methods for the internal prefix pair are exposed; the mapping remains an opaque implementation detail.
 - **FR-010**: The crate MUST be a pure library crate with no binary targets.
@@ -155,6 +158,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 
 - Q: Should `LogicalPathContext` expose a method to query whether an active mapping exists? → A: Expose `is_active() -> bool` method only (no accessor methods for prefix pair).
 - Q: What should `to_logical()` and `to_canonical()` return? → A: Always return `PathBuf` (infallible, no `Result`/`Option` wrapper).
+- Q: What should `to_logical()` and `to_canonical()` do when given a relative path? → A: Return relative paths unchanged (no translation attempted). Only absolute paths are eligible for prefix-matching.
 
 ## Assumptions
 
