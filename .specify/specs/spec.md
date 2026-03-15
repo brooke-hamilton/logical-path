@@ -123,7 +123,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - **FR-009**: No public API function MUST panic or return an unrecoverable error due to symlink-resolution state, missing environment variables, or non-UTF-8 path bytes.
 - **FR-009a**: `LogicalPathContext` MUST expose an `is_active() -> bool` method that returns `true` when an active prefix mapping exists and `false` otherwise. No accessor methods for the internal prefix pair are exposed; the mapping remains an opaque implementation detail.
 - **FR-010**: The crate MUST be a pure library crate with no binary targets.
-- **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf` or `Option<PathBuf>` / `Result<PathBuf, _>` as appropriate, without leaking internal implementation types.
+- **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf` (infallible, no `Result`/`Option` wrapper), without leaking internal implementation types. Translation methods are infallible by design: they always return a usable path.
 - **FR-012**: All public types and functions MUST have doc comments, including documented behaviour for the fall-back case and platform-specific notes.
 - **FR-013**: Platform-specific code paths MUST be gated with conditional compilation attributes (`#[cfg(unix)]`, `#[cfg(windows)]`, `#[cfg(target_os = "macos")]`, etc.).
 - **FR-014**: On Windows, where `$PWD` has no direct OS-level equivalent, `LogicalPathContext::detect()` MUST report no active mapping rather than attempting an incorrect heuristic; `to_logical()` and `to_canonical()` MUST fall back to returning input unchanged.
@@ -154,6 +154,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 ### Session 2026-03-15
 
 - Q: Should `LogicalPathContext` expose a method to query whether an active mapping exists? → A: Expose `is_active() -> bool` method only (no accessor methods for prefix pair).
+- Q: What should `to_logical()` and `to_canonical()` return? → A: Always return `PathBuf` (infallible, no `Result`/`Option` wrapper).
 
 ## Assumptions
 
