@@ -105,6 +105,8 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
   The algorithm only resolves one prefix mapping per context (the outermost divergence point). Nested symlinks outside that prefix are not translated.
 - What happens with path components that are empty strings or single dots?  
   Dot-components and empty components are treated as part of the raw path and are not specially handled by the prefix-matching logic; the OS-level `canonicalize` call handles their resolution.
+- What happens when a relative path (e.g., `../foo/bar.rs` or `src/main.rs`) is passed to `to_logical()` or `to_canonical()`?  
+  Relative paths are returned unchanged with no translation attempted. Prefix-matching operates exclusively on absolute paths; no implicit resolution against CWD is performed.
 - What happens on case-insensitive filesystems (macOS APFS)?  
   The library performs component-level comparison using the raw byte representation; callers on case-insensitive systems are responsible for normalising case before comparison if that behaviour is needed.
 
@@ -120,17 +122,20 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - **FR-006**: `LogicalPathContext` MUST expose a `to_canonical(&self, path: &Path) -> PathBuf` method that translates a logical path to its canonical equivalent using the stored mapping, or returns the input unchanged if no mapping applies or validation fails.
 - **FR-007**: Both `to_logical()` and `to_canonical()` MUST execute the Validate step (round-trip `canonicalize(translated) == canonicalize(original)`) before returning a translated path.
 - **FR-008**: Both `to_logical()` and `to_canonical()` MUST return the input path unchanged (fall back) when: the context has no active mapping, the path does not begin with the relevant prefix, or the Validate step fails.
+- **FR-008a**: Both `to_logical()` and `to_canonical()` MUST return relative paths unchanged with no translation attempted. Only absolute paths are eligible for prefix-matching and translation.
 - **FR-009**: No public API function MUST panic or return an unrecoverable error due to symlink-resolution state, missing environment variables, or non-UTF-8 path bytes.
+- **FR-009a**: `LogicalPathContext` MUST expose an `is_active() -> bool` method that returns `true` when an active prefix mapping exists and `false` otherwise. No accessor methods for the internal prefix pair are exposed; the mapping remains an opaque implementation detail.
 - **FR-010**: The crate MUST be a pure library crate with no binary targets.
-- **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf` or `Option<PathBuf>` / `Result<PathBuf, _>` as appropriate, without leaking internal implementation types.
+- **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf` (infallible, no `Result`/`Option` wrapper), without leaking internal implementation types. Translation methods are infallible by design: they always return a usable path.
 - **FR-012**: All public types and functions MUST have doc comments, including documented behaviour for the fall-back case and platform-specific notes.
 - **FR-013**: Platform-specific code paths MUST be gated with conditional compilation attributes (`#[cfg(unix)]`, `#[cfg(windows)]`, `#[cfg(target_os = "macos")]`, etc.).
 - **FR-014**: On Windows, where `$PWD` has no direct OS-level equivalent, `LogicalPathContext::detect()` MUST report no active mapping rather than attempting an incorrect heuristic; `to_logical()` and `to_canonical()` MUST fall back to returning input unchanged.
 - **FR-015**: The crate MUST compile and all tests MUST pass on Linux, macOS, and Windows.
+- **FR-016**: `LogicalPathContext` MUST derive (or implement) the `Debug`, `Clone`, and `PartialEq` traits. `Default` is intentionally excluded — there is no meaningful default context.
 
 ### Key Entities
 
-- **`LogicalPathContext`**: The central value type. Encapsulates zero or one active prefix mappings (a canonical prefix and its corresponding logical prefix). Created via `detect()`. Immutable after construction. Thread-safety properties follow from having no interior mutability.
+- **`LogicalPathContext`**: The central value type. Encapsulates zero or one active prefix mappings (a canonical prefix and its corresponding logical prefix). Created via `detect()`. Immutable after construction. Thread-safety properties follow from having no interior mutability. Derives `Debug`, `Clone`, and `PartialEq` for diagnostics, cheap duplication, and test assertions respectively. Exposes `is_active() -> bool` to query mapping state; the prefix pair itself is not publicly accessible.
 - **Prefix Mapping**: An internal representation of the divergence point between `$PWD` and `getcwd()`. Consists of a canonical path prefix and a logical path prefix, both derived at construction time. Not directly exposed in the public API.
 - **Canonical Path**: A fully resolved filesystem path with all symlinks removed, as returned by `std::fs::canonicalize()` or the OS. Input to `to_logical()`; output of `to_canonical()`.
 - **Logical Path**: A symlink-preserving filesystem path as recorded in `$PWD`. Output of `to_logical()`; input to `to_canonical()`.
@@ -147,6 +152,15 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - **SC-006**: All public items carry doc comments, and `cargo doc --no-deps` completes with zero warnings — confirming the API is self-documenting for downstream consumers.
 - **SC-007**: A developer calling `ctx.to_logical()` on a path that falls outside the mapped prefix receives the original path back unchanged — no mis-translation — verifiable by a targeted test case.
 - **SC-008**: The library handles paths with non-UTF-8 filenames without panicking, confirmed by a test that constructs such a path on Unix and asserts a clean return value.
+
+## Clarifications
+
+### Session 2026-03-15
+
+- Q: Should `LogicalPathContext` expose a method to query whether an active mapping exists? → A: Expose `is_active() -> bool` method only (no accessor methods for prefix pair).
+- Q: What should `to_logical()` and `to_canonical()` return? → A: Always return `PathBuf` (infallible, no `Result`/`Option` wrapper).
+- Q: What should `to_logical()` and `to_canonical()` do when given a relative path? → A: Return relative paths unchanged (no translation attempted). Only absolute paths are eligible for prefix-matching.
+- Q: Which standard Rust traits should `LogicalPathContext` derive? → A: `Debug + Clone + PartialEq` (no `Default` — there is no meaningful default context).
 
 ## Assumptions
 
