@@ -116,7 +116,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 
 - **FR-001**: The library MUST provide a `LogicalPathContext` type as its primary public interface.
 - **FR-002**: `LogicalPathContext` MUST expose a `detect()` associated function that reads `$PWD` from the process environment and the canonical current working directory from the OS, compares the two, and returns a `LogicalPathContext` value representing the detected mapping (if any).
-- **FR-003**: `LogicalPathContext::detect()` MUST implement the full five-step algorithm: Detect → Map → Translate → Validate → Fall back. No step may be skipped.
+- **FR-003**: The library MUST implement the full five-step algorithm: Detect → Map → Translate → Validate → Fall back. `detect()` performs the Detect and Map steps; `to_logical()` and `to_canonical()` perform the Translate, Validate, and Fall back steps. No step may be skipped.
 - **FR-004**: The mapping step MUST use suffix-matching on path components (not byte-level string prefix matching) to identify the divergence point between the logical and canonical paths.
 - **FR-005**: `LogicalPathContext` MUST expose a `to_logical(&self, path: &Path) -> PathBuf` method that translates a canonical path to its logical equivalent using the stored mapping, or returns the input unchanged if no mapping applies or validation fails.
 - **FR-006**: `LogicalPathContext` MUST expose a `to_canonical(&self, path: &Path) -> PathBuf` method that translates a logical path to its canonical equivalent using the stored mapping, or returns the input unchanged if no mapping applies or validation fails.
@@ -126,7 +126,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - **FR-009**: No public API function MUST panic or return an unrecoverable error due to symlink-resolution state, missing environment variables, or non-UTF-8 path bytes.
 - **FR-009a**: `LogicalPathContext` MUST expose an `is_active() -> bool` method that returns `true` when an active prefix mapping exists and `false` otherwise. No accessor methods for the internal prefix pair are exposed; the mapping remains an opaque implementation detail.
 - **FR-010**: The crate MUST be a pure library crate with no binary targets.
-- **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf` (infallible, no `Result`/`Option` wrapper), without leaking internal implementation types. Translation methods are infallible by design: they always return a usable path.
+- **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf`, without leaking internal implementation types.
 - **FR-012**: All public types and functions MUST have doc comments, including documented behaviour for the fall-back case and platform-specific notes.
 - **FR-013**: Platform-specific code paths MUST be gated with conditional compilation attributes (`#[cfg(unix)]`, `#[cfg(windows)]`, `#[cfg(target_os = "macos")]`, etc.).
 - **FR-014**: On Windows, where `$PWD` has no direct OS-level equivalent, `LogicalPathContext::detect()` MUST report no active mapping rather than attempting an incorrect heuristic; `to_logical()` and `to_canonical()` MUST fall back to returning input unchanged.
