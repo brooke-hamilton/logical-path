@@ -7,8 +7,6 @@
 
 **Translate canonical (symlink-resolved) filesystem paths back to their logical (symlink-preserving) equivalents.**
 
----
-
 ## The Problem
 
 Rust CLI tools that display filesystem paths or emit `cd` directives silently resolve symlinks, moving users out of their logical directory tree. The root cause is that Rust's standard library provides no way to work with *logical* paths — only *physical* ones:
@@ -94,7 +92,7 @@ fn emit_cd_directive(target: &PathBuf) {
 
 **Windows note:** `$PWD` has no direct OS-level equivalent. `subst` drive and junction detection is a known limitation; follow the tracking issue for updates.
 
-## Who This Affects
+## Use Cases
 
 Any Rust CLI tool that:
 
@@ -103,6 +101,10 @@ Any Rust CLI tool that:
 - Compares paths from different sources (e.g., `git worktree list` output vs the current directory)
 
 Common environments: WSL with mounted VHDs, NFS/network mounts, macOS `/var`/`/tmp`, custom workspace symlinks.
+
+## Contributing
+
+Contributions are welcome! Please open an issue to discuss any significant changes before submitting a pull request. Bug reports, feature requests, and platform-specific test cases are especially appreciated.
 
 ## Minimum Supported Rust Version (MSRV)
 
