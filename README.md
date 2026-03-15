@@ -16,7 +16,6 @@ Rust CLI tools that display filesystem paths or emit `cd` directives silently re
 
 The user's logical path lives in `$PWD`, a shell convention that `std` intentionally ignores. Any tool that calls these APIs and then shows a path to the user — or writes a `cd` directive for shell integration — will silently teleport the user from `/workspace/project` to `/mnt/wsl/workspace/project`.
 
-Two independent projects hit this bug and built nearly identical fixes: [worktrunk#968](https://github.com/max-sixty/worktrunk/issues/968) and [microsoft/Sysinternals-jcd#6](https://github.com/microsoft/Sysinternals-jcd/pull/6). The core algorithm each arrived at is ~60 lines; edge cases, cross-platform handling, and tests bring it to 300+. This crate packages that algorithm so you don't have to.
 
 ## Why Not an Existing Crate?
 
