@@ -2,7 +2,7 @@
   "name": "Rust",
   "image": "mcr.microsoft.com/devcontainers/rust:2.0.9-1-trixie",
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1.1.0": {}
   },
   "customizations": {
     "vscode": {
