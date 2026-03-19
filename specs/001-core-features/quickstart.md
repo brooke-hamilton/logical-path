@@ -38,9 +38,9 @@ fn main() {
 
 ```rust
 use logical_path::LogicalPathContext;
-use std::path::PathBuf;
+use std::path::Path;
 
-fn emit_cd_directive(target: &PathBuf) {
+fn emit_cd_directive(target: &Path) {
     let ctx = LogicalPathContext::detect();
     let logical = ctx.to_logical(target);
     println!("cd {}", logical.display());
