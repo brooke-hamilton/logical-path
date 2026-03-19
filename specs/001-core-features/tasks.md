@@ -33,7 +33,7 @@
 
 - [ ] T004 Implement `PrefixMapping` struct fields (`canonical_prefix: PathBuf`, `logical_prefix: PathBuf`) and derive `Debug, Clone, PartialEq, Eq` in src/lib.rs
 - [ ] T005 Implement `LogicalPathContext` struct field (`mapping: Option<PrefixMapping>`) with private fields in src/lib.rs
-- [ ] T006 Implement `has_mapping(&self) -> bool` method on `LogicalPathContext` that returns `self.mapping.is_some()` in src/lib.rs
+- [ ] T006 Implement `has_mapping(&self) -> bool` method on `LogicalPathContext` that returns `self.mapping.is_some()`, with `#[must_use]` annotation and doc comment per contracts/public-api.md, in src/lib.rs
 - [ ] T007 Add unit test for `has_mapping()` returning `false` when mapping is `None` and `true` when mapping is `Some` in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T007a Add compile-time `Send + Sync` assertion test for `LogicalPathContext` in src/lib.rs `#[cfg(test)] mod tests` to prevent accidental regressions
 - [ ] T008 Implement internal helper function `find_divergence_point(canonical: &Path, logical: &Path)` that uses `Path::components()` to find the longest common suffix, and returns `Option<(PathBuf, PathBuf)>` where the first element is the canonical prefix and the second is the logical prefix in src/lib.rs
@@ -82,6 +82,7 @@
 - [ ] T017 [US2] Write unit test: `to_logical()` with active mapping and path under canonical prefix returns translated path in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T018 [US2] Write unit test: `to_logical()` with active mapping and path NOT under canonical prefix returns input unchanged in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T019 [US2] Write unit test: `to_logical()` with no active mapping returns input unchanged in src/lib.rs `#[cfg(test)] mod tests`
+- [ ] T019a [US2] Write unit test: `to_logical()` with a relative path (e.g., `src/main.rs`) returns the input unchanged regardless of mapping state, per FR-008a, in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T020 [US2] Write integration test: `to_logical()` with real symlink environment performs correct translation with round-trip validation in tests/integration.rs
 
 ### Implementation for User Story 2
@@ -107,6 +108,7 @@
 - [ ] T024 [US3] Write unit test: `to_canonical()` with active mapping and path under logical prefix returns translated path in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T025 [US3] Write unit test: `to_canonical()` with active mapping and path NOT under logical prefix returns input unchanged in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T026 [US3] Write unit test: `to_canonical()` with no active mapping returns input unchanged in src/lib.rs `#[cfg(test)] mod tests`
+- [ ] T026a [US3] Write unit test: `to_canonical()` with a relative path (e.g., `../foo/bar.rs`) returns the input unchanged regardless of mapping state, per FR-008a, in src/lib.rs `#[cfg(test)] mod tests`
 - [ ] T027 [US3] Write integration test: `to_canonical()` with real symlink environment performs correct translation with round-trip validation in tests/integration.rs
 
 ### Implementation for User Story 3
@@ -114,7 +116,7 @@
 - [ ] T028 [US3] Implement `to_canonical(&self, path: &Path) -> PathBuf` in src/lib.rs: check for active mapping, check path starts with logical prefix via `Path::starts_with()`, strip logical prefix and prepend canonical prefix, run round-trip validation, fall back to input on any failure
 - [ ] T029 [US3] Add doc comment and `#[must_use]` to `to_canonical()` per contracts/public-api.md including fallback cases and panic guarantee in src/lib.rs
 - [ ] T030 [US3] Verify all US3 tests pass with `cargo test`
-- [ ] T030a Add parameterised round-trip test covering ≥10 distinct canonical/logical path structures per platform to satisfy SC-003, using a test table or `proptest` dev-dependency in src/lib.rs `#[cfg(test)] mod tests` or tests/integration.rs
+- [ ] T030a Add parameterised round-trip test covering ≥10 distinct canonical/logical path structures per platform to satisfy SC-003, using a test table (no additional dependency) in src/lib.rs `#[cfg(test)] mod tests` or tests/integration.rs
 
 **Checkpoint**: `to_canonical()` is fully functional. Full bidirectional translation is now available.
 
@@ -175,8 +177,9 @@
 - [ ] T043 Run full quality gate: `cargo test && cargo clippy -- --deny warnings && cargo fmt --check && cargo doc --no-deps`
 - [ ] T044 Run quickstart.md validation: verify the basic usage example compiles and the documented API matches the implementation
 - [ ] T045 Remove placeholder `add()` function and its test from src/lib.rs if still present
-- [ ] T046 [P] Create `.github/workflows/ci.yml` with matrix build for Linux, macOS, and Windows running `cargo test`, `cargo clippy -- --deny warnings`, `cargo fmt --check`, `cargo doc --no-deps`, and an MSRV build job
+- [ ] T046 [P] Create `.github/workflows/ci.yml` with matrix build for Linux, macOS, and Windows running `cargo test`, `cargo test --doc`, `cargo clippy -- --deny warnings`, `cargo fmt --check`, `cargo doc --no-deps`, and an MSRV build job (per constitution Quality Gates)
 - [ ] T047 [P] Pin `rust-version = "1.85.0"` (minimum for edition 2024) in Cargo.toml and add "Minimum Supported Rust Version" section to README.md
+- [ ] T047a [P] Add "Platform Notes" section to README.md documenting: Windows returns no-mapping (no `$PWD` equivalent), macOS `/private` prefix handled by generic algorithm, case-insensitive filesystem caveats — per constitution Principle IV
 
 ---
 
@@ -214,7 +217,7 @@
 - **Phase 4 & 5**: US2 and US3 can execute in parallel after US1 completes (independent translation directions)
 - **Phase 6**: All US4 test tasks (T031, T032, T033) can run in parallel
 - **Phase 7**: All US5 test tasks (T036, T037, T038) can run in parallel
-- **Phase 8**: T041, T042, T046, and T047 can run in parallel
+- **Phase 8**: T041, T042, T046, T047, and T047a can run in parallel
 
 ---
 
