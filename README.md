@@ -108,7 +108,7 @@ Contributions are welcome! Please open an issue to discuss any significant chang
 
 ## Minimum Supported Rust Version (MSRV)
 
-The MSRV will be set once the initial implementation is in place and is determined by the crate's dependencies. The MSRV is not changed without a minor-version bump.
+The minimum supported Rust version is **1.85.0** (required by edition 2024). The MSRV is not changed without a minor-version bump.
 
 ## License
 
