@@ -24,7 +24,7 @@ The crate exposes a single public type and its methods. No other types, traits, 
 ///   symlink prefix mappings.
 /// - **Windows**: Always reports no active mapping (`$PWD` has no OS-level
 ///   equivalent). All translations fall back to returning the input unchanged.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogicalPathContext { /* private fields */ }
 ```
 
@@ -52,6 +52,7 @@ impl LogicalPathContext {
     /// # Panics
     ///
     /// This function never panics.
+    #[must_use]
     pub fn detect() -> LogicalPathContext;
 }
 ```
@@ -75,17 +76,19 @@ impl LogicalPathContext {
     /// Returns the input path unchanged when:
     /// - No active mapping exists
     /// - The path does not start with the canonical prefix
+    /// - The path is relative (not absolute)
     /// - Round-trip validation fails
-    /// - Canonicalization of the translated path fails (e.g., path doesn't exist)
+    /// - Canonicalization of the translated path fails (e.g., path doesn't exist on disk)
     ///
     /// # Panics
     ///
     /// This function never panics, even with non-UTF-8 path components.
+    #[must_use]
     pub fn to_logical(&self, path: &Path) -> PathBuf;
 }
 ```
 
-**Preconditions**: `path` should be a canonical path for meaningful translation. Non-canonical paths are accepted but may fall back.
+**Preconditions**: `path` should be an absolute canonical path for meaningful translation. Relative paths are returned unchanged. Non-canonical paths are accepted but may fall back. The path must exist on disk for round-trip validation to succeed.
 **Postconditions**: Returns a non-empty `PathBuf`. If translation succeeded, `canonicalize(result) == canonicalize(input)`.
 **Error behavior**: Never errors. Falls back to returning `path.to_path_buf()`.
 
@@ -104,17 +107,19 @@ impl LogicalPathContext {
     /// Returns the input path unchanged when:
     /// - No active mapping exists
     /// - The path does not start with the logical prefix
+    /// - The path is relative (not absolute)
     /// - Round-trip validation fails
-    /// - Canonicalization of the translated path fails
+    /// - Canonicalization of the translated path fails (e.g., path doesn't exist on disk)
     ///
     /// # Panics
     ///
     /// This function never panics, even with non-UTF-8 path components.
+    #[must_use]
     pub fn to_canonical(&self, path: &Path) -> PathBuf;
 }
 ```
 
-**Preconditions**: `path` should be a logical path for meaningful translation. Non-logical paths are accepted but may fall back.
+**Preconditions**: `path` should be an absolute logical path for meaningful translation. Relative paths are returned unchanged. Non-logical paths are accepted but may fall back. The path must exist on disk for round-trip validation to succeed.
 **Postconditions**: Returns a non-empty `PathBuf`. If translation succeeded, `canonicalize(result) == canonicalize(input)`.
 **Error behavior**: Never errors. Falls back to returning `path.to_path_buf()`.
 
@@ -126,6 +131,7 @@ impl LogicalPathContext {
     ///
     /// When this returns `false`, `to_logical()` and `to_canonical()` will
     /// always return their input unchanged.
+    #[must_use]
     pub fn has_mapping(&self) -> bool;
 }
 ```

@@ -43,7 +43,6 @@ logical-path = "0.1"
 use logical_path::LogicalPathContext;
 
 // Detect any active symlink prefix mapping from $PWD vs getcwd().
-// Returns None if no symlink is in effect or $PWD is unset.
 let ctx = LogicalPathContext::detect();
 
 // Translate a canonical path to its logical (symlink-preserving) equivalent.
@@ -58,9 +57,9 @@ let fs_path = ctx.to_canonical(&logical_path);
 
 ```rust
 use logical_path::LogicalPathContext;
-use std::path::PathBuf;
+use std::path::Path;
 
-fn emit_cd_directive(target: &PathBuf) {
+fn emit_cd_directive(target: &Path) {
     let ctx = LogicalPathContext::detect();
     // Without this, the user would be teleported to the canonical path.
     let logical = ctx.to_logical(target);
@@ -77,6 +76,8 @@ fn emit_cd_directive(target: &PathBuf) {
 3. **Translate** — For any canonical path, strip the canonical prefix and prepend the logical prefix.
 4. **Validate** — Round-trip check (`canonicalize(translated) == canonicalize(original)`) to catch prefix mappings broad enough to mistranslate unrelated paths.
 5. **Fall back** — Return the canonical path unchanged if `$PWD` is unset, stale, or the mapping doesn't apply.
+
+> **Note:** The Validate step calls `std::fs::canonicalize()`, which requires the path to exist on disk. Translation of paths to non-existent files will always fall back to returning the input unchanged.
 
 ## Platform Notes
 

@@ -1,6 +1,6 @@
 # Feature Specification: logical-path Core Library
 
-**Feature Branch**: `copilot/create-spec-for-crate`  
+**Feature Branch**: `001-core-features`  
 **Created**: 2025-07-18  
 **Status**: Draft  
 **Input**: User description: "Core `logical-path` crate library — a Rust library that translates canonical (symlink-resolved) filesystem paths back to their logical (symlink-preserving) equivalents."
@@ -17,11 +17,11 @@ A developer building a CLI tool calls `LogicalPathContext::detect()` at startup.
 
 **Acceptance Scenarios**:
 
-1. **Given** a process where `$PWD` is `/workspace/project` and the canonical CWD is `/mnt/wsl/workspace/project`, **When** `LogicalPathContext::detect()` is called, **Then** the returned context records `canonical_prefix = /mnt/wsl/workspace` and `logical_prefix = /workspace` (or the appropriate divergence point), and reports an active mapping.
+1. **Given** a process where `$PWD` is `/workspace/project` and the canonical CWD is `/mnt/wsl/workspace/project`, **When** `LogicalPathContext::detect()` is called, **Then** the returned context records a prefix mapping at the divergence point (the suffix-matching algorithm finds common trailing components `["workspace", "project"]`, yielding `canonical_prefix = /mnt/wsl` and `logical_prefix = /`), and reports an active mapping.
 2. **Given** a process where `$PWD` equals the canonical CWD (no active symlink), **When** `LogicalPathContext::detect()` is called, **Then** the returned context reports no active mapping.
 3. **Given** a process where `$PWD` is unset, **When** `LogicalPathContext::detect()` is called, **Then** the returned context reports no active mapping and does not panic.
 4. **Given** a process where `$PWD` is set to a path that no longer exists on disk (stale), **When** `LogicalPathContext::detect()` is called, **Then** the returned context reports no active mapping and does not panic or return an error to the caller.
-5. **Given** a macOS environment where the canonical CWD has a `/private` prefix (e.g., `/private/var/folders/…`) and `$PWD` shows `/var/folders/…`, **When** `LogicalPathContext::detect()` is called, **Then** the returned context correctly identifies the `/private/var` → `/var` mapping.
+5. **Given** a macOS environment where the canonical CWD has a `/private` prefix (e.g., `/private/var/folders/…`) and `$PWD` shows `/var/folders/…`, **When** `LogicalPathContext::detect()` is called, **Then** the returned context correctly identifies the divergence point (e.g., `canonical_prefix = /private` and `logical_prefix = /`, since `var/folders/…` is the common suffix).
 
 ---
 
@@ -86,7 +86,7 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 **Acceptance Scenarios**:
 
 1. **Given** a Linux environment with a user-created symlink (e.g., `/workspace` → `/mnt/data/workspace`), **When** `LogicalPathContext::detect()` is called from within a directory under that symlink, **Then** the correct prefix mapping is detected and translation succeeds.
-2. **Given** a macOS environment where `$PWD` is `/var/folders/xyz` and the canonical CWD is `/private/var/folders/xyz`, **When** `LogicalPathContext::detect()` is called, **Then** the mapping `/private/var` → `/var` is detected.
+2. **Given** a macOS environment where `$PWD` is `/var/folders/xyz` and the canonical CWD is `/private/var/folders/xyz`, **When** `LogicalPathContext::detect()` is called, **Then** the divergence mapping is detected (suffix-matching finds common suffix `["var", "folders", "xyz"]`, yielding `canonical_prefix = /private` and `logical_prefix = /`).
 3. **Given** a Windows environment, **When** `LogicalPathContext::detect()` is called, **Then** the context reports no active mapping and subsequent translation calls return inputs unchanged without panicking.
 
 ---
@@ -107,6 +107,8 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
   Dot-components and empty components are treated as part of the raw path and are not specially handled by the prefix-matching logic; the OS-level `canonicalize` call handles their resolution.
 - What happens when a relative path (e.g., `../foo/bar.rs` or `src/main.rs`) is passed to `to_logical()` or `to_canonical()`?  
   Relative paths are returned unchanged with no translation attempted. Prefix-matching operates exclusively on absolute paths; no implicit resolution against CWD is performed.
+- What happens when the target path does not exist on disk?  
+  The round-trip validation step calls `std::fs::canonicalize()`, which requires the path to exist. If either the original or translated path does not exist, `canonicalize()` fails and the fallback is returned. Translation requires both paths to be resolvable on disk.
 - What happens on case-insensitive filesystems (macOS APFS)?  
   The library performs component-level comparison using the raw byte representation; callers on case-insensitive systems are responsible for normalising case before comparison if that behaviour is needed.
 
@@ -124,18 +126,19 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - **FR-008**: Both `to_logical()` and `to_canonical()` MUST return the input path unchanged (fall back) when: the context has no active mapping, the path does not begin with the relevant prefix, or the Validate step fails.
 - **FR-008a**: Both `to_logical()` and `to_canonical()` MUST return relative paths unchanged with no translation attempted. Only absolute paths are eligible for prefix-matching and translation.
 - **FR-009**: No public API function MUST panic or return an unrecoverable error due to symlink-resolution state, missing environment variables, or non-UTF-8 path bytes.
-- **FR-009a**: `LogicalPathContext` MUST expose an `is_active() -> bool` method that returns `true` when an active prefix mapping exists and `false` otherwise. No accessor methods for the internal prefix pair are exposed; the mapping remains an opaque implementation detail.
+- **FR-009a**: `LogicalPathContext` MUST expose a `has_mapping() -> bool` method that returns `true` when an active prefix mapping exists and `false` otherwise. No accessor methods for the internal prefix pair are exposed; the mapping remains an opaque implementation detail.
 - **FR-010**: The crate MUST be a pure library crate with no binary targets.
 - **FR-011**: All public API functions MUST accept `&Path`-like inputs (not `String`) and return `PathBuf`, without leaking internal implementation types.
 - **FR-012**: All public types and functions MUST have doc comments, including documented behaviour for the fall-back case and platform-specific notes.
 - **FR-013**: Platform-specific code paths MUST be gated with conditional compilation attributes (`#[cfg(unix)]`, `#[cfg(windows)]`, `#[cfg(target_os = "macos")]`, etc.).
 - **FR-014**: On Windows, where `$PWD` has no direct OS-level equivalent, `LogicalPathContext::detect()` MUST report no active mapping rather than attempting an incorrect heuristic; `to_logical()` and `to_canonical()` MUST fall back to returning input unchanged.
 - **FR-015**: The crate MUST compile and all tests MUST pass on Linux, macOS, and Windows.
-- **FR-016**: `LogicalPathContext` MUST derive (or implement) the `Debug`, `Clone`, and `PartialEq` traits. `Default` is intentionally excluded — there is no meaningful default context.
+- **FR-016**: `LogicalPathContext` MUST derive (or implement) the `Debug`, `Clone`, `PartialEq`, and `Eq` traits. `Default` is intentionally excluded — there is no meaningful default context.
+- **FR-017**: All public methods that return values (`detect()`, `to_logical()`, `to_canonical()`, `has_mapping()`) MUST be annotated with `#[must_use]` to prevent callers from accidentally discarding results.
 
 ### Key Entities
 
-- **`LogicalPathContext`**: The central value type. Encapsulates zero or one active prefix mappings (a canonical prefix and its corresponding logical prefix). Created via `detect()`. Immutable after construction. Thread-safety properties follow from having no interior mutability. Derives `Debug`, `Clone`, and `PartialEq` for diagnostics, cheap duplication, and test assertions respectively. Exposes `is_active() -> bool` to query mapping state; the prefix pair itself is not publicly accessible.
+- **`LogicalPathContext`**: The central value type. Encapsulates zero or one active prefix mappings (a canonical prefix and its corresponding logical prefix). Created via `detect()`. Immutable after construction. Thread-safety properties follow from having no interior mutability. Derives `Debug`, `Clone`, `PartialEq`, and `Eq` for diagnostics, cheap duplication, and test assertions respectively. Exposes `has_mapping() -> bool` to query mapping state; the prefix pair itself is not publicly accessible.
 - **Prefix Mapping**: An internal representation of the divergence point between `$PWD` and `getcwd()`. Consists of a canonical path prefix and a logical path prefix, both derived at construction time. Not directly exposed in the public API.
 - **Canonical Path**: A fully resolved filesystem path with all symlinks removed, as returned by `std::fs::canonicalize()` or the OS. Input to `to_logical()`; output of `to_canonical()`.
 - **Logical Path**: A symlink-preserving filesystem path as recorded in `$PWD`. Output of `to_logical()`; input to `to_canonical()`.
@@ -157,10 +160,10 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 
 ### Session 2026-03-15
 
-- Q: Should `LogicalPathContext` expose a method to query whether an active mapping exists? → A: Expose `is_active() -> bool` method only (no accessor methods for prefix pair).
+- Q: Should `LogicalPathContext` expose a method to query whether an active mapping exists? → A: Expose `has_mapping() -> bool` method only (no accessor methods for prefix pair).
 - Q: What should `to_logical()` and `to_canonical()` return? → A: Always return `PathBuf` (infallible, no `Result`/`Option` wrapper).
 - Q: What should `to_logical()` and `to_canonical()` do when given a relative path? → A: Return relative paths unchanged (no translation attempted). Only absolute paths are eligible for prefix-matching.
-- Q: Which standard Rust traits should `LogicalPathContext` derive? → A: `Debug + Clone + PartialEq` (no `Default` — there is no meaningful default context).
+- Q: Which standard Rust traits should `LogicalPathContext` derive? → A: `Debug + Clone + PartialEq + Eq` (no `Default` — there is no meaningful default context).
 
 ## Assumptions
 
@@ -169,7 +172,8 @@ The library operates correctly on Linux, macOS, and Windows. On Linux and macOS,
 - The library does not cache filesystem state between calls to `to_logical()` / `to_canonical()`; it assumes that the mapping established at `detect()` time remains valid for the lifetime of the context. Callers operating in long-lived processes in volatile mount environments should recreate the context as needed.
 - Windows support is explicitly limited for v0.1: `$PWD` has no direct OS-level equivalent, so detection always reports no active mapping. `subst` drive and NTFS junction detection are acknowledged future work.
 - Case-insensitive filesystem handling (macOS APFS, Windows NTFS) is not explicitly normalised by the library; the OS-level `canonicalize` call handles case resolution during validation.
-- The MSRV will be pinned once initial implementation is complete and dependency requirements are known, per the constitution's TODO.
+- The MSRV is at minimum 1.85.0 (required by edition 2024). The exact MSRV will be pinned once initial implementation is complete, per the constitution's TODO.
+- The public API uses `&Path` parameters for simplicity in v0.1. A future minor version may broaden to `impl AsRef<Path>` for ergonomic acceptance of `&str`, `String`, `PathBuf`, etc. — matching the convention used by `std::fs::canonicalize()` and similar std APIs.
 
 ## Dependencies & Constraints
 

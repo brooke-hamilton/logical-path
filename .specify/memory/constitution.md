@@ -184,6 +184,7 @@ change in the PR description, and (c) updates the `LAST_AMENDED_DATE` and
 at least one maintainer before merge.
 
 **Versioning policy for the constitution itself**:
+
 - MAJOR: removal of a principle or backward-incompatible governance change.
 - MINOR: addition of a new principle or materially new governance section.
 - PATCH: clarifications, wording improvements, typo fixes.

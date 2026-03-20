@@ -72,9 +72,9 @@
 
 ## R-008: Test Infrastructure
 
-**Decision**: Use `tempfile` crate for integration tests that create real symlinks. Unit tests for the suffix-matching algorithm use constructed `LogicalPathContext` values with known prefix pairs (no filesystem interaction). Platform-specific tests gated with `#[cfg(target_os = "...")]`.
+**Decision**: Use `tempfile` crate for integration tests that create real symlinks. Unit tests for the suffix-matching algorithm use constructed `LogicalPathContext` values with known prefix pairs (no filesystem interaction). Platform-specific tests gated with `#[cfg(target_os = "...")]`. The public `detect()` function delegates to an internal `pub(crate) detect_from(pwd: Option<&OsStr>, canonical_cwd: &Path)` helper, enabling unit tests to exercise detection logic by passing parameters directly rather than modifying process-global state (`$PWD`, CWD). This avoids test races under `cargo test`'s default parallel execution.
 
-**Rationale**: `tempfile` provides automatic cleanup and avoids test pollution. Separating unit tests (pure logic) from integration tests (filesystem interaction) keeps the test suite fast and reliable.
+**Rationale**: `tempfile` provides automatic cleanup and avoids test pollution. Separating unit tests (pure logic) from integration tests (filesystem interaction) keeps the test suite fast and reliable. The `detect_from()` seam follows the standard Rust pattern of extracting environment-dependent logic into a testable inner function (similar to how `std` separates logic from OS calls).
 
 **Alternatives considered**:
 - Manual temp directory management — rejected because `tempfile` is the Rust ecosystem standard and handles cleanup on panic.
