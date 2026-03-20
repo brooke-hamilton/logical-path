@@ -156,7 +156,7 @@
 > **Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T036 [P] [US5] Write platform-gated test (`#[cfg(target_os = "linux")]`): `detect()` with real symlink works on Linux in tests/integration.rs
-- [X] T037 [P] [US5] Write platform-gated test (`#[cfg(target_os = "macos")]`): `detect()` handles `/private/var` → `/var` mapping on macOS in tests/integration.rs
+- [X] T037 [P] [US5] Write platform-gated unit test (`#[cfg(target_os = "macos")]`) in src/lib.rs (e.g., `detect_from_macos_private_prefix_has_mapping`) to verify `detect()` handles `/private/var` → `/var` mapping on macOS
 - [X] T038 [P] [US5] Write platform-gated test (`#[cfg(windows)]`): `detect()` returns no-mapping and all translations return input unchanged on Windows in tests/integration.rs
 
 ### Implementation for User Story 5

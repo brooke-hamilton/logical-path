@@ -483,11 +483,14 @@ mod tests {
     }
 
     // Helper to build a context with a known mapping for unit tests
-    fn ctx_with_mapping(canonical: &str, logical: &str) -> LogicalPathContext {
+    fn ctx_with_mapping(
+        canonical: impl AsRef<Path>,
+        logical: impl AsRef<Path>,
+    ) -> LogicalPathContext {
         LogicalPathContext {
             mapping: Some(PrefixMapping {
-                canonical_prefix: PathBuf::from(canonical),
-                logical_prefix: PathBuf::from(logical),
+                canonical_prefix: canonical.as_ref().to_path_buf(),
+                logical_prefix: logical.as_ref().to_path_buf(),
             }),
         }
     }
@@ -511,10 +514,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&canonical_base, &logical_base).unwrap();
 
-        let ctx = ctx_with_mapping(
-            canonical_base.to_str().unwrap(),
-            logical_base.to_str().unwrap(),
-        );
+        let ctx = ctx_with_mapping(&canonical_base, &logical_base);
 
         let input = canonical_base.join("src");
         let result = ctx.to_logical(&input);
@@ -562,10 +562,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&canonical_base, &logical_base).unwrap();
 
-        let ctx = ctx_with_mapping(
-            canonical_base.to_str().unwrap(),
-            logical_base.to_str().unwrap(),
-        );
+        let ctx = ctx_with_mapping(&canonical_base, &logical_base);
 
         let input = logical_base.join("src");
         let result = ctx.to_canonical(&input);
@@ -613,7 +610,7 @@ mod tests {
         std::fs::create_dir_all(real_base.join("src")).unwrap();
         // No symlink created, so canonicalize of bogus_link/src will fail
 
-        let ctx = ctx_with_mapping(real_base.to_str().unwrap(), bogus_logical.to_str().unwrap());
+        let ctx = ctx_with_mapping(&real_base, &bogus_logical);
 
         let input = real_base.join("src");
         let result = ctx.to_logical(&input);
@@ -630,10 +627,7 @@ mod tests {
         std::fs::create_dir_all(link_base.join("src")).unwrap();
         // No real directory behind bogus_canonical
 
-        let ctx = ctx_with_mapping(
-            bogus_canonical.to_str().unwrap(),
-            link_base.to_str().unwrap(),
-        );
+        let ctx = ctx_with_mapping(&bogus_canonical, &link_base);
 
         let input = link_base.join("src");
         let result = ctx.to_canonical(&input);

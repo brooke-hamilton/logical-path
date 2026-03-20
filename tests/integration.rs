@@ -1,5 +1,4 @@
 use logical_path::LogicalPathContext;
-use std::sync::Mutex;
 
 /// Serializes tests that mutate process-global state (current directory and `$PWD`).
 ///
@@ -7,7 +6,8 @@ use std::sync::Mutex;
 /// `$PWD` or the current directory, so they never run concurrently with each other.
 /// Tests that only call `detect()` without first acquiring this lock must not
 /// mutate environment variables.
-static ENV_MUTEX: Mutex<()> = Mutex::new(());
+#[cfg(unix)]
+static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// RAII guard that restores the process working directory and `$PWD` on drop.
 ///
