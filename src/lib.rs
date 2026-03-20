@@ -82,7 +82,7 @@ impl LogicalPathContext {
     pub fn detect() -> LogicalPathContext {
         #[cfg(windows)]
         {
-            return LogicalPathContext { mapping: None };
+            LogicalPathContext { mapping: None }
         }
 
         #[cfg(not(windows))]
@@ -98,6 +98,7 @@ impl LogicalPathContext {
 
     /// Internal helper for testability: takes `$PWD` and canonical CWD as
     /// parameters instead of reading from global process state.
+    #[cfg(not(windows))]
     pub(crate) fn detect_from(pwd: Option<&OsStr>, canonical_cwd: &Path) -> LogicalPathContext {
         let pwd = match pwd {
             Some(p) if !p.is_empty() => Path::new(p),
@@ -241,6 +242,7 @@ enum TranslationDirection {
 /// Returns `Some((canonical_prefix, logical_prefix))` if the paths share a
 /// common suffix but differ in their prefixes. Returns `None` if the paths
 /// are identical or share no common suffix components.
+#[cfg(not(windows))]
 fn find_divergence_point(canonical: &Path, logical: &Path) -> Option<(PathBuf, PathBuf)> {
     let canonical_components: Vec<_> = canonical.components().collect();
     let logical_components: Vec<_> = logical.components().collect();
@@ -312,6 +314,7 @@ mod tests {
     }
 
     // T009: find_divergence_point tests
+    #[cfg(not(windows))]
     #[test]
     fn divergence_identical_paths_returns_none() {
         let result = find_divergence_point(
@@ -321,6 +324,7 @@ mod tests {
         assert_eq!(result, None);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_common_suffix_different_prefixes() {
         let result = find_divergence_point(
@@ -335,12 +339,14 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_no_common_components_returns_none() {
         let result = find_divergence_point(Path::new("/a/b/c"), Path::new("/x/y/z"));
         assert_eq!(result, None);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_trailing_slashes() {
         // Path::components() normalizes trailing slashes
@@ -354,6 +360,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_dot_components() {
         // Path::components() normalizes `.` (CurDir)
@@ -367,6 +374,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_dotdot_components() {
         // `..` is preserved as a component by Path::components() — it doesn't
@@ -386,6 +394,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_redundant_separators() {
         // Path::components() normalizes redundant separators
@@ -399,6 +408,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn divergence_macos_private_prefix() {
         let result = find_divergence_point(
@@ -412,6 +422,7 @@ mod tests {
     }
 
     // T010: detect_from() with pwd matching canonical CWD → no mapping
+    #[cfg(not(windows))]
     #[test]
     fn detect_from_pwd_matches_canonical_returns_no_mapping() {
         use std::ffi::OsStr;
@@ -421,6 +432,7 @@ mod tests {
     }
 
     // T011: detect_from() with pwd as None → no mapping
+    #[cfg(not(windows))]
     #[test]
     fn detect_from_pwd_none_returns_no_mapping() {
         let cwd = Path::new("/home/user/project");
@@ -429,6 +441,7 @@ mod tests {
     }
 
     // T013: detect_from() with stale pwd (non-existent path) → no mapping
+    #[cfg(not(windows))]
     #[test]
     fn detect_from_stale_pwd_returns_no_mapping() {
         use std::ffi::OsStr;
@@ -442,6 +455,7 @@ mod tests {
     }
 
     // T033: detect_from() with corrupted/partially-resolved pwd → no mapping
+    #[cfg(not(windows))]
     #[test]
     fn detect_from_corrupted_pwd_returns_no_mapping() {
         use std::ffi::OsStr;
