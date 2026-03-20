@@ -33,6 +33,7 @@
 //! - **Windows**: `detect()` returns no active mapping; all translations return
 //!   the input unchanged.
 
+#[cfg(not(windows))]
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
