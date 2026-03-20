@@ -1,4 +1,66 @@
 use logical_path::LogicalPathContext;
+use std::sync::Mutex;
+
+/// Serializes tests that mutate process-global state (current directory and `$PWD`).
+///
+/// All environment-mutating tests in this file acquire this lock before touching
+/// `$PWD` or the current directory, so they never run concurrently with each other.
+/// Tests that only call `detect()` without first acquiring this lock must not
+/// mutate environment variables.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+/// RAII guard that restores the process working directory and `$PWD` on drop.
+///
+/// Holds `ENV_MUTEX` for its entire lifetime, serializing all environment mutations
+/// within this test binary. `set_var`/`remove_var` are `unsafe` in Rust 2024 because
+/// concurrent environment modification is undefined behaviour; holding `ENV_MUTEX`
+/// ensures that no two tests in this binary modify the environment at the same time.
+#[cfg(unix)]
+struct EnvGuard {
+    saved_dir: std::path::PathBuf,
+    saved_pwd: Option<std::ffi::OsString>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(unix)]
+impl EnvGuard {
+    /// Acquires `ENV_MUTEX` and snapshots the current environment state.
+    ///
+    /// If the mutex is poisoned (a previous test panicked while holding it), the
+    /// guard is recovered and the snapshot is taken from whatever state the
+    /// environment is in, allowing subsequent tests to run independently.
+    fn acquire() -> Self {
+        let lock = ENV_MUTEX.lock().unwrap_or_else(|e| {
+            eprintln!("EnvGuard: recovering poisoned ENV_MUTEX after a previous test panic");
+            e.into_inner()
+        });
+        EnvGuard {
+            saved_dir: std::env::current_dir().expect("current_dir"),
+            saved_pwd: std::env::var_os("PWD"),
+            _lock: lock,
+        }
+    }
+
+    fn set(&self, canonical_dir: &std::path::Path, logical_pwd: &std::path::Path) {
+        std::env::set_current_dir(canonical_dir).expect("set_current_dir");
+        // SAFETY: ENV_MUTEX is held for the duration of this test, serializing all
+        // environment mutations within this test binary. No other test-file code
+        // modifies $PWD or CWD without holding the same lock.
+        unsafe { std::env::set_var("PWD", logical_pwd) };
+    }
+}
+
+#[cfg(unix)]
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.saved_dir);
+        // SAFETY: Same invariant as in `set` — ENV_MUTEX is still held here.
+        match &self.saved_pwd {
+            Some(p) => unsafe { std::env::set_var("PWD", p) },
+            None => unsafe { std::env::remove_var("PWD") },
+        }
+    }
+}
 
 // T012: detect() inside a real symlink directory returns context with has_mapping() == true
 #[cfg(unix)]
@@ -6,19 +68,18 @@ use logical_path::LogicalPathContext;
 fn detect_inside_real_symlink_has_mapping() {
     use std::os::unix::fs::symlink;
 
+    let guard = EnvGuard::acquire();
+
     let dir = tempfile::tempdir().unwrap();
-    let real_base = dir.path().join("real");
-    let link_base = dir.path().join("link");
-    let subdir = "project";
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("project");
+    let link_base = base.join("link");
 
-    std::fs::create_dir_all(real_base.join(subdir)).unwrap();
-    symlink(&real_base, &link_base).unwrap();
+    std::fs::create_dir_all(&real_dir).unwrap();
+    symlink(base.join("real"), &link_base).unwrap();
 
-    // Simulate: canonical CWD = real_base/project, $PWD = link_base/project
-    let ctx = LogicalPathContext::detect_from(
-        Some(link_base.join(subdir).as_os_str()),
-        &real_base.join(subdir),
-    );
+    guard.set(&real_dir, &link_base.join("project"));
+    let ctx = LogicalPathContext::detect();
 
     assert!(ctx.has_mapping());
 }
@@ -30,24 +91,23 @@ fn detect_inside_real_symlink_has_mapping() {
 fn detect_nested_symlinks_detects_outermost_divergence() {
     use std::os::unix::fs::symlink;
 
-    let dir = tempfile::tempdir().unwrap();
-    let real_base = dir.path().join("real");
-    let link1 = dir.path().join("link1");
-    let link2 = dir.path().join("link2");
-    let subdir = "project";
+    let guard = EnvGuard::acquire();
 
-    std::fs::create_dir_all(real_base.join(subdir)).unwrap();
-    // link1 -> real
-    symlink(&real_base, &link1).unwrap();
-    // link2 -> link1 (nested symlink)
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("project");
+    let link1 = base.join("link1");
+    let link2 = base.join("link2");
+
+    std::fs::create_dir_all(&real_dir).unwrap();
+    // link1 -> real, link2 -> link1 (nested)
+    symlink(base.join("real"), &link1).unwrap();
     symlink(&link1, &link2).unwrap();
 
     // canonical CWD resolves both symlinks: real/project
     // $PWD follows the outermost symlink: link2/project
-    let ctx = LogicalPathContext::detect_from(
-        Some(link2.join(subdir).as_os_str()),
-        &real_base.join(subdir),
-    );
+    guard.set(&real_dir, &link2.join("project"));
+    let ctx = LogicalPathContext::detect();
 
     assert!(ctx.has_mapping());
 }
@@ -58,19 +118,20 @@ fn detect_nested_symlinks_detects_outermost_divergence() {
 fn to_logical_with_real_symlink() {
     use std::os::unix::fs::symlink;
 
+    let guard = EnvGuard::acquire();
+
     let dir = tempfile::tempdir().unwrap();
-    let real_base = dir.path().join("real");
-    let link_base = dir.path().join("link");
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("src");
+    let link_base = base.join("link");
 
-    std::fs::create_dir_all(real_base.join("src")).unwrap();
-    symlink(&real_base, &link_base).unwrap();
+    std::fs::create_dir_all(&real_dir).unwrap();
+    symlink(base.join("real"), &link_base).unwrap();
 
-    let ctx = LogicalPathContext::detect_from(
-        Some(link_base.join("src").as_os_str()),
-        &real_base.join("src"),
-    );
+    guard.set(&real_dir, &link_base.join("src"));
+    let ctx = LogicalPathContext::detect();
 
-    let canonical_path = real_base.join("src");
+    let canonical_path = base.join("real").join("src");
     let result = ctx.to_logical(&canonical_path);
     assert_eq!(result, link_base.join("src"));
 }
@@ -81,21 +142,22 @@ fn to_logical_with_real_symlink() {
 fn to_canonical_with_real_symlink() {
     use std::os::unix::fs::symlink;
 
+    let guard = EnvGuard::acquire();
+
     let dir = tempfile::tempdir().unwrap();
-    let real_base = dir.path().join("real");
-    let link_base = dir.path().join("link");
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("src");
+    let link_base = base.join("link");
 
-    std::fs::create_dir_all(real_base.join("src")).unwrap();
-    symlink(&real_base, &link_base).unwrap();
+    std::fs::create_dir_all(&real_dir).unwrap();
+    symlink(base.join("real"), &link_base).unwrap();
 
-    let ctx = LogicalPathContext::detect_from(
-        Some(link_base.join("src").as_os_str()),
-        &real_base.join("src"),
-    );
+    guard.set(&real_dir, &link_base.join("src"));
+    let ctx = LogicalPathContext::detect();
 
     let logical_path = link_base.join("src");
     let result = ctx.to_canonical(&logical_path);
-    assert_eq!(result, real_base.join("src"));
+    assert_eq!(result, base.join("real").join("src"));
 }
 
 // ===== US5: Cross-platform tests =====
@@ -106,38 +168,25 @@ fn to_canonical_with_real_symlink() {
 fn detect_with_real_symlink_on_linux() {
     use std::os::unix::fs::symlink;
 
+    let guard = EnvGuard::acquire();
+
     let dir = tempfile::tempdir().unwrap();
-    let real_base = dir.path().join("real");
-    let link_base = dir.path().join("link");
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("project");
+    let link_base = base.join("link");
 
-    std::fs::create_dir_all(real_base.join("project")).unwrap();
-    symlink(&real_base, &link_base).unwrap();
+    std::fs::create_dir_all(&real_dir).unwrap();
+    symlink(base.join("real"), &link_base).unwrap();
 
-    let ctx = LogicalPathContext::detect_from(
-        Some(link_base.join("project").as_os_str()),
-        &real_base.join("project"),
-    );
+    guard.set(&real_dir, &link_base.join("project"));
+    let ctx = LogicalPathContext::detect();
 
     assert!(ctx.has_mapping());
 
     // Verify translation works
-    let canonical = real_base.join("project");
+    let canonical = base.join("real").join("project");
     let logical = ctx.to_logical(&canonical);
     assert_eq!(logical, link_base.join("project"));
-}
-
-// T037: Platform-gated test for macOS — handles /private prefix
-#[cfg(target_os = "macos")]
-#[test]
-fn detect_handles_macos_private_prefix() {
-    // On macOS, /var is a symlink to /private/var
-    // detect_from with $PWD=/var/... and canonical=/private/var/... should detect mapping
-    let ctx = LogicalPathContext::detect_from(
-        Some(std::ffi::OsStr::new("/var/folders")),
-        std::path::Path::new("/private/var/folders"),
-    );
-
-    assert!(ctx.has_mapping());
 }
 
 // T038: Platform-gated test for Windows

@@ -98,8 +98,7 @@ impl LogicalPathContext {
 
     /// Internal helper for testability: takes `$PWD` and canonical CWD as
     /// parameters instead of reading from global process state.
-    #[doc(hidden)]
-    pub fn detect_from(pwd: Option<&OsStr>, canonical_cwd: &Path) -> LogicalPathContext {
+    pub(crate) fn detect_from(pwd: Option<&OsStr>, canonical_cwd: &Path) -> LogicalPathContext {
         let pwd = match pwd {
             Some(p) if !p.is_empty() => Path::new(p),
             _ => return LogicalPathContext { mapping: None },
@@ -108,6 +107,13 @@ impl LogicalPathContext {
         // If pwd and canonical CWD are identical, no mapping needed
         if pwd == canonical_cwd {
             return LogicalPathContext { mapping: None };
+        }
+
+        // Validate that pwd resolves to canonical_cwd. This rejects stale $PWD
+        // values (non-existent directories) and divergent $PWD assignments.
+        match std::fs::canonicalize(pwd) {
+            Ok(canonical_pwd) if canonical_pwd == canonical_cwd => {}
+            _ => return LogicalPathContext { mapping: None },
         }
 
         match find_divergence_point(canonical_cwd, pwd) {
@@ -431,14 +437,8 @@ mod tests {
             Some(OsStr::new("/nonexistent/stale/path/project")),
             cwd,
         );
-        // Stale pwd: the logical prefix doesn't exist on disk, so find_divergence_point
-        // may return a mapping, but the caller should still get a context. Stale detection
-        // happens at translation time via round-trip validation, not at detect time.
-        // The mapping is still set if the suffix matches, since detect doesn't validate
-        // filesystem existence — that's done at translation time.
-        // For stale pwd that shares a suffix, we still get a mapping.
-        // The fallback safety net is at to_logical/to_canonical time.
-        let _ = ctx; // Just verify no panic
+        // canonicalize("/nonexistent/stale/path/project") fails → no mapping
+        assert!(!ctx.has_mapping());
     }
 
     // T033: detect_from() with corrupted/partially-resolved pwd → no mapping
@@ -448,6 +448,24 @@ mod tests {
         let cwd = Path::new("/home/user/project");
         let ctx = LogicalPathContext::detect_from(Some(OsStr::new("")), cwd);
         assert!(!ctx.has_mapping());
+    }
+
+    // T037: detect_from() with macOS /var → /private/var system symlink pattern
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn detect_from_macos_private_prefix_has_mapping() {
+        // On macOS, /var is a symlink to /private/var.
+        // Validate that a $PWD path under /var is detected as a mapping.
+        use std::ffi::OsStr;
+        let logical_path = Path::new("/var/folders");
+        let Ok(canonical_cwd) = std::fs::canonicalize(logical_path) else {
+            return; // Skip if /var/folders doesn't exist
+        };
+        if canonical_cwd == logical_path {
+            return; // Skip if /var is not a symlink on this system
+        }
+        let ctx = LogicalPathContext::detect_from(Some(OsStr::new("/var/folders")), &canonical_cwd);
+        assert!(ctx.has_mapping());
     }
 
     // Helper to build a context with a known mapping for unit tests
@@ -467,6 +485,7 @@ mod tests {
     // ===== US2: to_logical() tests =====
 
     // T017: to_logical() with active mapping and path under canonical prefix
+    #[cfg(unix)]
     #[test]
     fn to_logical_translates_path_under_canonical_prefix() {
         // Use real filesystem paths so canonicalize() works for round-trip
@@ -518,6 +537,7 @@ mod tests {
     // ===== US3: to_canonical() tests =====
 
     // T024: to_canonical() with active mapping and path under logical prefix
+    #[cfg(unix)]
     #[test]
     fn to_canonical_translates_path_under_logical_prefix() {
         let dir = tempfile::tempdir().unwrap();
@@ -637,8 +657,12 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();
-        let real_base = dir.path().join("real");
-        let link_base = dir.path().join("link");
+        // Canonicalize the temp dir base so that detect_from's pwd validation
+        // succeeds on systems where the temp directory is under a symlink
+        // (e.g., macOS where /tmp → /private/tmp).
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let real_base = base.join("real");
+        let link_base = base.join("link");
 
         // Create a directory tree for testing
         let subdirs = [
