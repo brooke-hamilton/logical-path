@@ -43,6 +43,7 @@ An internal (non-public) type representing the divergence point between the logi
 **Derives**: `Debug`, `Clone`, `PartialEq`, `Eq`
 
 **Validation Rules**:
+
 - Both prefixes must be non-empty absolute paths.
 - The canonical prefix must differ from the logical prefix (otherwise no mapping is needed).
 - The suffixes (path components after the divergence point) must match between the `$PWD` and `getcwd()` paths.

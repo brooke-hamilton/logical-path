@@ -16,11 +16,10 @@ Rust CLI tools that display filesystem paths or emit `cd` directives silently re
 
 The user's logical path lives in `$PWD`, a shell convention that `std` intentionally ignores. Any tool that calls these APIs and then shows a path to the user — or writes a `cd` directive for shell integration — will silently teleport the user from `/workspace/project` to `/mnt/wsl/workspace/project`.
 
-
 ## Why Not an Existing Crate?
 
 | Crate | What it does | Gap |
-|---|---|---|
+| ----- | ------------ | --- |
 | [`dunce`](https://crates.io/crates/dunce) | Strips `\\?\` from Windows canonical paths | Doesn't preserve symlinks |
 | [`path-absolutize`](https://crates.io/crates/path-absolutize) | Makes paths absolute without resolving symlinks | Lexical only; no `$PWD` awareness |
 | [`path-dedot`](https://crates.io/crates/path-dedot) | Removes `.`/`..` lexically | Pure string manipulation |
@@ -82,7 +81,7 @@ fn emit_cd_directive(target: &Path) {
 ## Platform Notes
 
 | | Linux | macOS | Windows |
-|---|---|---|---|
+| --- | ----- | ----- | ------- |
 | Logical path source | `$PWD` | `$PWD` | No direct equivalent |
 | System symlinks | User-created only | `/var`→`/private/var`, `/tmp`→`/private/tmp` | NTFS junctions, directory symlinks |
 | Case sensitivity | Yes | No (APFS default) | No |
