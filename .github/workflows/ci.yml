@@ -25,11 +25,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # @stable
         with:
           components: clippy, rustfmt
-      - run: cargo test
-      - run: cargo test --doc
-      - run: cargo clippy -- --deny warnings
-      - run: cargo fmt --check
-      - run: cargo doc --no-deps
+      - run: make build
+      - run: make test
+      - run: make lint
+      - run: make fmt-check
+      - run: make doc
 
   msrv:
     name: MSRV (1.85.0)
@@ -39,5 +39,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # @stable
         with:
           toolchain: "1.85.0"
-      - run: cargo build
-      - run: cargo test
+      - run: make build
+      - run: make test
