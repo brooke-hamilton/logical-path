@@ -3,6 +3,12 @@ name = "logical-path"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85.0"
+description = "Translate canonical (symlink-resolved) filesystem paths back to their logical (symlink-preserving) equivalents"
+repository = "https://github.com/brooke-hamilton/logical-path"
+license = "MIT"
+readme = "README.md"
+keywords = ["symlink", "path", "canonical", "logical", "pwd"]
+categories = ["filesystem", "command-line-utilities"]
 
 [dependencies]
 
