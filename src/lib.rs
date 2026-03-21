@@ -65,6 +65,16 @@ struct PrefixMapping {
     logical_prefix: PathBuf,
 }
 
+impl Default for LogicalPathContext {
+    /// Returns a context with no active mapping.
+    ///
+    /// Equivalent to calling `detect()` in an environment with no symlinks
+    /// in effect. All translations return their input unchanged.
+    fn default() -> Self {
+        LogicalPathContext { mapping: None }
+    }
+}
+
 impl LogicalPathContext {
     /// Detect the active symlink prefix mapping by comparing `$PWD` (logical)
     /// against `getcwd()` (canonical).
@@ -312,6 +322,14 @@ mod tests {
     fn logical_path_context_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<LogicalPathContext>();
+    }
+
+    // T007b: Default returns no-mapping context
+    #[test]
+    fn default_returns_no_mapping() {
+        let ctx = LogicalPathContext::default();
+        assert!(!ctx.has_mapping());
+        assert_eq!(ctx, LogicalPathContext { mapping: None });
     }
 
     // T009: find_divergence_point tests
@@ -657,6 +675,96 @@ mod tests {
         // detect_from with non-utf8 pwd — should not panic
         let ctx2 = LogicalPathContext::detect_from(Some(non_utf8), Path::new("/home/user"));
         let _ = ctx2;
+    }
+
+    // T034: Idempotence — to_logical on an already-logical path returns it unchanged
+    #[cfg(unix)]
+    #[test]
+    fn to_logical_idempotent_on_logical_path() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let canonical_base = dir.path().join("real");
+        let logical_base = dir.path().join("link");
+
+        std::fs::create_dir_all(canonical_base.join("src")).unwrap();
+        symlink(&canonical_base, &logical_base).unwrap();
+
+        let ctx = ctx_with_mapping(&canonical_base, &logical_base);
+
+        // Applying to_logical to an already-logical path should return it unchanged
+        // because the logical prefix doesn't start with the canonical prefix.
+        let logical_path = logical_base.join("src");
+        let result = ctx.to_logical(&logical_path);
+        assert_eq!(result, logical_path);
+    }
+
+    // T034a: Idempotence — to_canonical on an already-canonical path returns it unchanged
+    #[cfg(unix)]
+    #[test]
+    fn to_canonical_idempotent_on_canonical_path() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let canonical_base = dir.path().join("real");
+        let logical_base = dir.path().join("link");
+
+        std::fs::create_dir_all(canonical_base.join("src")).unwrap();
+        symlink(&canonical_base, &logical_base).unwrap();
+
+        let ctx = ctx_with_mapping(&canonical_base, &logical_base);
+
+        // Applying to_canonical to an already-canonical path should return it unchanged
+        // because the canonical prefix doesn't start with the logical prefix.
+        let canonical_path = canonical_base.join("src");
+        let result = ctx.to_canonical(&canonical_path);
+        assert_eq!(result, canonical_path);
+    }
+
+    // T035: detect_from with divergent $PWD (valid dir that canonicalizes elsewhere)
+    #[cfg(not(windows))]
+    #[test]
+    fn detect_from_divergent_pwd_returns_no_mapping() {
+        // Create two real directories — $PWD points to dir_a but CWD is dir_b
+        let dir = tempfile::tempdir().unwrap();
+        let dir_a = dir.path().join("a");
+        let dir_b = dir.path().join("b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+
+        let canonical_a = std::fs::canonicalize(&dir_a).unwrap();
+        let canonical_b = std::fs::canonicalize(&dir_b).unwrap();
+
+        // $PWD is valid but canonicalizes to dir_a, not dir_b → no mapping
+        let ctx = LogicalPathContext::detect_from(Some(canonical_a.as_os_str()), &canonical_b);
+        assert!(!ctx.has_mapping());
+    }
+
+    // T035a: Translation works on file paths, not just directories
+    #[cfg(unix)]
+    #[test]
+    fn to_logical_translates_file_paths() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let canonical_base = dir.path().join("real");
+        let logical_base = dir.path().join("link");
+
+        std::fs::create_dir_all(canonical_base.join("src")).unwrap();
+        // Create a file so canonicalize() succeeds during round-trip validation
+        std::fs::write(canonical_base.join("src").join("main.rs"), b"fn main() {}").unwrap();
+        symlink(&canonical_base, &logical_base).unwrap();
+
+        let ctx = ctx_with_mapping(&canonical_base, &logical_base);
+
+        let canonical_file = canonical_base.join("src").join("main.rs");
+        let result = ctx.to_logical(&canonical_file);
+        assert_eq!(result, logical_base.join("src").join("main.rs"));
+
+        // And back
+        let logical_file = logical_base.join("src").join("main.rs");
+        let back = ctx.to_canonical(&logical_file);
+        assert_eq!(back, canonical_base.join("src").join("main.rs"));
     }
 
     // T030a: Parameterised round-trip test covering ≥10 distinct path structures

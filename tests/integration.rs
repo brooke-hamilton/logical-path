@@ -160,6 +160,61 @@ fn to_canonical_with_real_symlink() {
     assert_eq!(result, base.join("real").join("src"));
 }
 
+// T034b: Idempotence — to_logical on already-logical path with real detect()
+#[cfg(unix)]
+#[test]
+fn to_logical_idempotent_with_real_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let guard = EnvGuard::acquire();
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("src");
+    let link_base = base.join("link");
+
+    std::fs::create_dir_all(&real_dir).unwrap();
+    symlink(base.join("real"), &link_base).unwrap();
+
+    guard.set(&real_dir, &link_base.join("src"));
+    let ctx = LogicalPathContext::detect();
+
+    // First translation: canonical → logical
+    let canonical = base.join("real").join("src");
+    let logical = ctx.to_logical(&canonical);
+    assert_eq!(logical, link_base.join("src"));
+
+    // Second translation: already-logical → should return unchanged
+    let again = ctx.to_logical(&logical);
+    assert_eq!(again, logical);
+}
+
+// T035b: File path translation with real symlink environment
+#[cfg(unix)]
+#[test]
+fn to_logical_translates_file_path_with_real_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let guard = EnvGuard::acquire();
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real").join("src");
+    let link_base = base.join("link");
+
+    std::fs::create_dir_all(&real_dir).unwrap();
+    std::fs::write(real_dir.join("main.rs"), b"fn main() {}").unwrap();
+    symlink(base.join("real"), &link_base).unwrap();
+
+    guard.set(&real_dir, &link_base.join("src"));
+    let ctx = LogicalPathContext::detect();
+
+    // Translate a file path (not just a directory)
+    let canonical_file = base.join("real").join("src").join("main.rs");
+    let result = ctx.to_logical(&canonical_file);
+    assert_eq!(result, link_base.join("src").join("main.rs"));
+}
+
 // ===== US5: Cross-platform tests =====
 
 // T036: Platform-gated test for Linux
