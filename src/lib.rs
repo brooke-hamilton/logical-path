@@ -736,10 +736,7 @@ mod tests {
         let canonical_b = std::fs::canonicalize(&dir_b).unwrap();
 
         // $PWD is valid but canonicalizes to dir_a, not dir_b → no mapping
-        let ctx = LogicalPathContext::detect_from(
-            Some(canonical_a.as_os_str()),
-            &canonical_b,
-        );
+        let ctx = LogicalPathContext::detect_from(Some(canonical_a.as_os_str()), &canonical_b);
         assert!(!ctx.has_mapping());
     }
 
