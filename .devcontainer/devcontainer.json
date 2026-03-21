@@ -7,9 +7,10 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        "davidanson.vscode-markdownlint",
         "rust-lang.rust-analyzer",
-        "vadimcn.vscode-lldb",
-        "tamasfe.even-better-toml"
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb"
       ],
       "settings": {
         "editor.formatOnSave": true,
