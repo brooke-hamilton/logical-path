@@ -1,12 +1,13 @@
 ---
+
 description: "Expert in creating and maintaining comprehensive documentation for the logical-path project"
 tools:
-  - name: grep
-  - name: glob
-  - name: view
-  - name: edit
-  - name: create
-  - name: bash
+  - grep
+  - glob
+  - view
+  - edit
+  - create
+  - bash
 ---
 
 # Documentation Expert Agent
