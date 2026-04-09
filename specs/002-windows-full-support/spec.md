@@ -114,6 +114,8 @@ All existing Linux and macOS detection and translation behavior remains unchange
   The canonicalization step during detection or round-trip validation fails; the fallback path is returned unchanged.
 - What happens when a subst drive letter is reassigned to a different target after `detect()`?
   The round-trip validation will fail because the canonical resolution no longer matches the stored mapping; fallback applies.
+- What happens when a junction, subst drive, or mapped drive is retargeted (not just removed) between `detect()` and `to_logical()`?
+  The TOCTOU window means the stored mapping may be stale. Round-trip validation detects the mismatch and returns the original path unchanged. The library provides best-effort, non-atomic guarantees.
 - What happens when multiple subst drives or junctions are nested?
   The library detects only the outermost mapping (the divergence between the working directory path and its fully resolved form). Nested indirections within the resolved path are not separately tracked.
 - What happens with UNC paths (e.g., `\\server\share\folder`)?
@@ -127,12 +129,34 @@ All existing Linux and macOS detection and translation behavior remains unchange
 - What happens when the working directory is on a network drive mapped via `net use`?
   Network drive letters mapped via `net use` are similar to subst drives. The library attempts to resolve the drive letter to its UNC target and detect any mapping. If resolution is not possible, no mapping is detected and fallback applies.
 
+---
+
+### Out of Scope
+
+The following items are explicitly excluded from this feature:
+
+- **`\\.\` device paths**: Device namespace paths (e.g., `\\.\PhysicalDrive0`, `\\.\COM1`) are not handled by the `\\?\` prefix stripping logic and are not relevant to directory-level path indirection.
+- **File-level symbolic links**: Symlinks to individual files (as opposed to directory-level links) are resolved by `std::fs::canonicalize()` during validation but are not separately detected or tracked as mappings.
+- **WSL path interop**: Translation between WSL Linux paths (`/mnt/c/...`) and Windows paths (`C:\...`) is not in scope. The library operates within a single OS context.
+- **Drive mapping authentication/credentials**: The library does not manage, store, or handle credentials for `net use` mapped drives. It only detects the path mapping if the OS resolves it.
+- **Locale-specific case folding**: Path comparison uses ordinal case-insensitive comparison on Windows. Locale-aware or Unicode-normalized case folding is not performed.
+
+## Clarifications
+
+### Session 2026-04-09
+
+- Q: Should Windows directory symlinks (`mklink /D`) be explicitly in-scope? → A: Yes, explicitly in-scope — add to FR-002 wording and add a test scenario.
+- Q: Should the spec set an explicit latency bound for `detect()`? → A: No explicit target. The operations are inherently fast OS calls; no benchmark test required.
+- Q: Should the spec explicitly acknowledge the TOCTOU race window between `detect()` and `to_logical()`/`to_canonical()`? → A: Yes. Document that detection is best-effort and non-atomic, with round-trip validation as mitigation.
+- Q: Should the spec include an explicit out-of-scope section? → A: Yes. Add out-of-scope section listing `\\.\` device paths, file-level symlinks, WSL interop, and drive auth/credentials.
+- Q: Should the library emit structured diagnostics for detection outcomes? → A: Yes. Add trace-level diagnostics via `log` or `tracing` for detection steps and fallback reasons.
+
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: On Windows, `LogicalPathContext::detect()` MUST resolve the current working directory's canonical path by querying the OS for the fully resolved physical path, stripping `\\?\` Extended Length Path prefixes from the result.
-- **FR-002**: On Windows, the library MUST detect path indirections (NTFS junctions, `subst` drives, and `net use` mapped drives) by comparing `current_dir()` (which preserves indirections) against `canonicalize(current_dir())` (which resolves to the physical path), then stripping `\\?\` prefixes from the canonicalized result. When the two paths differ, the divergence point is identified using the same suffix-matching algorithm used on Unix. This single mechanism handles all forms of Windows directory-level indirection.
+- **FR-002**: On Windows, the library MUST detect path indirections (NTFS junctions, Windows directory symlinks (`mklink /D`), `subst` drives, and `net use` mapped drives) by comparing `current_dir()` (which preserves indirections) against `canonicalize(current_dir())` (which resolves to the physical path), then stripping `\\?\` prefixes from the canonicalized result. When the two paths differ, the divergence point is identified using the same suffix-matching algorithm used on Unix. This single mechanism handles all forms of Windows directory-level indirection, including directory symlinks.
 - **FR-003**: On Windows, the `$PWD`-based staleness validation used on Unix (checking that `canonicalize($PWD) == canonical_cwd`) MUST NOT be applied. Since `current_dir()` is maintained by the OS (not a user-controlled environment variable), it is always current by definition. The detection step MUST compare `current_dir()` against `canonicalize(current_dir())` directly without an intermediate staleness check.
 - **FR-004**: On Windows, `\\?\` Extended Length Path prefixes returned by `std::fs::canonicalize()` MUST be stripped before any path comparison or prefix matching. The stripping logic MUST handle both `\\?\C:\...` (local paths) and `\\?\UNC\server\share\...` (UNC paths, converted to `\\server\share\...`).
 - **FR-005**: On Windows, path component comparison during suffix matching MUST be case-insensitive to match NTFS and Windows OS behavior. This applies to the divergence-point algorithm only, not to the returned path values (which preserve original casing).
@@ -143,10 +167,12 @@ All existing Linux and macOS detection and translation behavior remains unchange
 - **FR-010**: All existing public API contracts MUST be preserved: `detect()` returns `LogicalPathContext`, `to_logical()` and `to_canonical()` return `PathBuf`, `has_mapping()` returns `bool`, and no method panics or returns an error type.
 - **FR-011**: All platform-specific code paths MUST be gated with conditional compilation attributes (`#[cfg(windows)]`, `#[cfg(not(windows))]`, `#[cfg(unix)]`, etc.).
 - **FR-012**: The library MUST compile and all tests MUST pass on Linux, macOS, and Windows.
+- **FR-013**: The library MUST emit trace-level diagnostic messages (via the `log` or `tracing` crate) at key detection and translation decision points. At minimum, diagnostics MUST cover: (a) the `current_dir()` and `canonicalize()` values compared during detection, (b) whether a mapping was detected and the prefix pair, (c) fallback reasons when round-trip validation fails or no mapping applies. These diagnostics MUST be at `trace` or `debug` level and incur zero overhead when no subscriber/logger is active.
 
 ### Key Entities
 
 - **NTFS Junction**: A Windows filesystem feature that creates a directory-level link (reparse point) from one location to another. Similar to a Unix directory symlink. Created via `mklink /J`. The library detects junctions by comparing the junction path against its resolved target.
+- **Windows Directory Symlink**: A directory-level symbolic link created via `mklink /D`. Distinct from NTFS junctions: directory symlinks can target remote paths and require elevated privileges or Developer Mode (Windows 10+). They are a separate reparse point type but are resolved by the same `current_dir()` vs `canonicalize()` detection mechanism.
 - **Subst Drive**: A virtual drive letter created by the Windows `subst` command, mapped to an existing directory path. The library detects subst drives by resolving the drive letter to its underlying target.
 - **Extended Length Path Prefix (`\\?\`)**: A Windows path prefix that bypasses the `MAX_PATH` (260 character) limit. Returned by `std::fs::canonicalize()` on Windows. Must be stripped for correct path comparison and prefix matching.
 - **UNC Path**: A Windows network path in the form `\\server\share\path`. When `\\?\` stripping encounters `\\?\UNC\...`, it converts to `\\server\share\...`.
@@ -163,23 +189,26 @@ All existing Linux and macOS detection and translation behavior remains unchange
 - **SC-006**: All existing Linux and macOS tests continue to pass without modification after the Windows changes are merged.
 - **SC-007**: Case-insensitive path comparison on Windows correctly identifies mappings even when casing differs between the working directory path and the resolved path — verified by a test with mixed-case junction or subst paths.
 - **SC-008**: The library adds no new unconditional dependencies for the Windows detection logic. Platform-gated conditional dependencies (e.g., `windows-sys` behind `#[cfg(windows)]`) are acceptable if needed for OS API access, but the dependency footprint on non-Windows platforms MUST remain unchanged.
+- **SC-009**: Trace-level diagnostics are emitted during detection and fallback — verified by enabling a `tracing` or `log` subscriber in a test, running `detect()` and `to_logical()`, and asserting that relevant diagnostic messages are captured.
 
 ## Assumptions
 
-- NTFS junctions and directory symbolic links are the primary forms of directory-level indirection on Windows that this feature addresses. File-level symbolic links (symlinks to individual files) are not separately handled; they are resolved by `std::fs::canonicalize()` during validation.
-- NTFS junctions, `subst` drives, and `net use` mapped drives are all detected by the same mechanism: comparing `current_dir()` against `canonicalize(current_dir())`. No separate per-indirection-type detection logic (e.g., `QueryDosDevice`) is required, though such APIs may be used as an optimization or fallback if the primary mechanism proves insufficient.
+- NTFS junctions and Windows directory symlinks (`mklink /D`) are both explicitly in-scope as primary forms of directory-level indirection. They are detected by the same `current_dir()` vs `canonicalize()` mechanism and must have dedicated test coverage. File-level symbolic links (symlinks to individual files) are not separately handled; they are resolved by `std::fs::canonicalize()` during validation.
+- NTFS junctions, Windows directory symlinks (`mklink /D`), `subst` drives, and `net use` mapped drives are all detected by the same mechanism: comparing `current_dir()` against `canonicalize(current_dir())`. No separate per-indirection-type detection logic (e.g., `QueryDosDevice`) is required, though such APIs may be used as an optimization or fallback if the primary mechanism proves insufficient.
 - The `\\?\` prefix stripping covers the two standard forms: `\\?\X:\...` for local paths and `\\?\UNC\server\share\...` for UNC paths. Other extended-length path forms (e.g., `\\.\` device paths) are not in scope.
 - Windows path comparison during suffix matching uses the OS-level case-insensitive behavior (ordinal case-insensitive comparison). Locale-specific case folding is not performed.
 - Only one prefix mapping is active per process context, consistent with the existing Unix behavior. If a path traverses both a subst drive and a junction, the outermost indirection (the one visible at the working directory level) is captured.
+- Detection is **best-effort and non-atomic**. A TOCTOU (time-of-check-time-of-use) window exists between `detect()` and subsequent `to_logical()`/`to_canonical()` calls: the underlying junction, subst mapping, or drive mapping could be removed, retargeted, or replaced during this window. The round-trip validation step in `to_logical()` and `to_canonical()` serves as the safety net — if the mapping is no longer valid at translation time, the original path is returned unchanged. The library does not provide atomic or transactional path-resolution guarantees.
 - Network drives mapped via `net use` are handled by the same `current_dir()` vs `canonicalize()` comparison. If `canonicalize()` resolves the mapped drive to its UNC target, the mapping is detected. If `canonicalize()` does not resolve through the mapping (some network configurations), no mapping is detected and fallback applies.
 - On Windows, `current_dir()` (via `GetCurrentDirectoryW`) is always current because the OS maintains it — unlike Unix `$PWD`, which is a user-controlled environment variable that can become stale. Therefore, the staleness validation step used on Unix is unnecessary on Windows.
 - The minimum supported Rust version (MSRV) and edition constraints from the existing crate apply. No new MSRV bump is required unless Windows-specific standard library APIs demand it.
 - Existing cross-platform CI (Linux, macOS, Windows) is in place and will validate that no regressions are introduced.
+- No explicit performance latency target is defined for `detect()` or translation methods. The underlying OS calls (`GetCurrentDirectoryW`, `GetFinalPathNameByHandleW`) are inherently fast (microsecond-scale on local filesystems). The library performs no network I/O, recursive directory traversal, or blocking operations beyond single-path canonicalization.
 
 ## Dependencies & Constraints
 
 - **No `unsafe` code**: Unless a specific, documented justification exists (e.g., calling a Windows API that requires `unsafe`). Any `unsafe` usage must be minimal, well-documented, and have no safe alternative.
-- **Minimal new dependencies**: Windows-specific OS API access should use the standard library or the `windows-sys` crate (commonly used for Windows API bindings in the Rust ecosystem). No heavyweight dependencies.
+- **Minimal new dependencies**: Windows-specific OS API access should use the standard library or the `windows-sys` crate (commonly used for Windows API bindings in the Rust ecosystem). A `log` or `tracing` facade dependency is acceptable for diagnostic output (must be behind a feature flag or use the lightweight `log` facade). No heavyweight dependencies.
 - **Backward compatibility**: The public API surface does not change. `detect()`, `to_logical()`, `to_canonical()`, and `has_mapping()` retain their existing signatures and semantics.
 - **Conditional compilation**: All Windows-specific code must be behind `#[cfg(windows)]` gates. All existing Unix code must remain behind `#[cfg(not(windows))]` or equivalent gates.
 - **Quality gates**: All pull requests must pass `cargo test`, `cargo clippy -- --deny warnings`, `cargo fmt --check`, `cargo doc --no-deps`, and MSRV build on all three platforms.
