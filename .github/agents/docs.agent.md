@@ -69,7 +69,7 @@ Key concepts you must understand:
 ### Markdown Formatting
 
 - Follow markdownlint rules (see `.github/instructions/markdown.instructions.md`).
-- Use ATX-style headings (`#`) with a single space after the hash.
+- Use atx-style headings (`#`) with a single space after the hash.
 - Surround headings, code blocks, lists, and tables with blank lines.
 - Use fenced code blocks with language identifiers.
 - Keep heading hierarchy sequential (don't skip levels).
@@ -78,7 +78,7 @@ Key concepts you must understand:
 ### Code Examples
 
 - All code examples must be valid Rust that compiles against the current API.
-- Use `no_run` for examples that require filesystem state or environment variables.
+- Use the `no_run` rustdoc attribute for examples that compile but cannot execute in a doc-test context (e.g., they require specific filesystem state or environment variables).
 - Use `ignore` only as a last resort, with a comment explaining why.
 - Show realistic use cases, not contrived examples.
 - Include both the simple happy path and edge cases where appropriate.
