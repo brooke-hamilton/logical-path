@@ -101,6 +101,19 @@ Any Rust CLI tool that:
 
 Common environments: WSL with mounted VHDs, NFS/network mounts, macOS `/var`/`/tmp`, custom workspace symlinks.
 
+## Documentation
+
+For more in-depth documentation beyond this README, see the [`docs/`](docs/) directory:
+
+- **[Architecture](docs/architecture.md)** — Data model, design invariants, module layout, and testability seams.
+- **[How It Works](docs/how-it-works.md)** — Step-by-step walkthrough of the detection and translation algorithm with visual examples.
+- **[API Reference](docs/api-reference.md)** — Detailed guide to every public method, with usage patterns and code examples.
+- **[Platform Behavior](docs/platform-behavior.md)** — How the crate behaves on Linux, macOS, and Windows, including known quirks and limitations.
+- **[Examples](docs/examples.md)** — Real-world integration patterns: shell directives, git worktrees, global context, and more.
+- **[FAQ](docs/FAQ.md)** — Frequently asked questions about edge cases, design decisions, and platform support.
+
+API documentation is also available on [docs.rs](https://docs.rs/logical-path).
+
 ## Contributing
 
 Contributions are welcome! Please open an issue to discuss any significant changes before submitting a pull request. Bug reports, feature requests, and platform-specific test cases are especially appreciated.
