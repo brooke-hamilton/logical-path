@@ -35,6 +35,7 @@ Detect the active symlink prefix mapping by comparing `$PWD` (logical) against `
 - `$PWD` equals the canonical CWD (no symlink in effect)
 - `$PWD` is stale (points to a non-existent directory)
 - `$PWD` doesn't resolve to the same canonical CWD
+- `$PWD` resolves to the canonical CWD, but there is no common suffix between the logical `$PWD` path and the canonical CWD
 - The current directory cannot be determined
 - Running on Windows
 

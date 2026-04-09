@@ -43,9 +43,9 @@ Not exposed in the public API. Holds the two prefixes that diverge between the l
 
 **Invariants**:
 
-- Both prefixes are non-empty absolute paths.
+- When detection succeeds from a shell-provided absolute `$PWD`, both prefixes are non-empty absolute paths.
 - The canonical prefix differs from the logical prefix.
-- The suffixes (path components after the divergence point) match between `$PWD` and `getcwd()`.
+- When detection is based on an absolute `$PWD`, the suffixes (path components after the divergence point) match between `$PWD` and `getcwd()`.
 
 ### `TranslationDirection` (internal)
 
