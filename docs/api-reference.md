@@ -25,25 +25,28 @@ The primary (and only) public type. Holds zero or one detected prefix mappings b
 pub fn detect() -> LogicalPathContext
 ```
 
-Detect the active symlink prefix mapping by comparing `$PWD` (logical) against `getcwd()` (canonical).
+Detect the active prefix mapping from the process environment.
+
+- **Unix**: Compares `$PWD` (logical) against `getcwd()` (canonical).
+- **Windows**: Compares `current_dir()` (logical, preserves junctions/subst) against `canonicalize(current_dir())` (canonical, physical path) with `\\?\` prefix stripped.
 
 **Returns** a `LogicalPathContext` value. This function never fails — if detection cannot determine a valid mapping, the returned context simply has no active mapping.
 
 **Returns no mapping when**:
 
-- `$PWD` is unset or empty
-- `$PWD` equals the canonical CWD (no symlink in effect)
-- `$PWD` is stale (points to a non-existent directory)
-- `$PWD` doesn't resolve to the same canonical CWD
-- `$PWD` resolves to the canonical CWD, but there is no common suffix between the logical `$PWD` path and the canonical CWD
+- `$PWD` is unset or empty (Unix)
+- The logical and canonical CWD are identical (no indirection in effect)
+- `$PWD` is stale (Unix: points to a non-existent directory)
+- `$PWD` doesn't resolve to the same canonical CWD (Unix)
+- No common suffix between the logical and canonical CWD
 - The current directory cannot be determined
-- Running on Windows
 
 **Usage pattern**: Call once at program startup and reuse the context for the lifetime of the process. If the environment changes (e.g., the user `cd`s elsewhere), call `detect()` again.
 
 ```rust
 use logical_path::LogicalPathContext;
 
+// Works on Unix (via $PWD vs getcwd) and Windows (via current_dir vs canonicalize).
 let ctx = LogicalPathContext::detect();
 // Reuse `ctx` for all path translations in this session.
 ```
@@ -67,9 +70,9 @@ use logical_path::LogicalPathContext;
 let ctx = LogicalPathContext::detect();
 
 if ctx.has_mapping() {
-    println!("Symlink prefix mapping is active");
+    println!("Path indirection prefix mapping is active");
 } else {
-    println!("No symlink mapping detected — paths will pass through unchanged");
+    println!("No prefix mapping detected — paths will pass through unchanged");
 }
 ```
 
@@ -158,7 +161,7 @@ let ctx = LogicalPathContext::default();
 assert!(!ctx.has_mapping());
 ```
 
-Returns a context with no active mapping. Useful as a placeholder or in tests where no symlink translation is needed. Equivalent to calling `detect()` in an environment with no symlinks.
+Returns a context with no active mapping. Useful as a placeholder or in tests where no path translation is needed. Equivalent to calling `detect()` in an environment with no path indirections (no symlinks, junctions, or subst drives).
 
 ## Common Patterns
 

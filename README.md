@@ -11,10 +11,10 @@
 
 Rust CLI tools that display filesystem paths or emit `cd` directives silently resolve symlinks, moving users out of their logical directory tree. The root cause is that Rust's standard library provides no way to work with *logical* paths — only *physical* ones:
 
-- **`std::env::current_dir()`** calls `getcwd(2)`, which returns the physical path.
+- **`std::env::current_dir()`** calls `getcwd(2)` on Unix, which returns the physical path.
 - **`std::fs::canonicalize()`** resolves all symlinks by design.
 
-The user's logical path lives in `$PWD`, a shell convention that `std` intentionally ignores. Any tool that calls these APIs and then shows a path to the user — or writes a `cd` directive for shell integration — will silently teleport the user from `/workspace/project` to `/mnt/wsl/workspace/project`.
+On Unix, the user's logical path lives in `$PWD`, a shell convention that `std` intentionally ignores. On Windows, `current_dir()` preserves junctions and subst drives but `canonicalize()` resolves them — and prepends a `\\?\` prefix. Any tool that calls these APIs and then shows a path to the user — or writes a `cd` directive for shell integration — will silently teleport the user out of their logical directory tree.
 
 ## Why Not an Existing Crate?
 
@@ -41,7 +41,8 @@ logical-path = "0.1"
 ```rust
 use logical_path::LogicalPathContext;
 
-// Detect any active symlink prefix mapping from $PWD vs getcwd().
+// Detect any active prefix mapping from the process environment.
+// Unix: compares $PWD vs getcwd(). Windows: compares current_dir() vs canonicalize().
 let ctx = LogicalPathContext::detect();
 
 // Translate a canonical path to its logical (symlink-preserving) equivalent.
@@ -70,11 +71,11 @@ fn emit_cd_directive(target: &Path) {
 
 `LogicalPathContext::detect()` implements a five-step algorithm:
 
-1. **Detect** — Compare `$PWD` (logical) against `getcwd()` (canonical).
+1. **Detect** — Compare the logical CWD against the canonical CWD. On Unix, this is `$PWD` vs `getcwd()`. On Windows, this is `current_dir()` vs `canonicalize()` (with `\\?\` prefix stripped).
 2. **Map** — Suffix-match path components to find the divergence point; extract canonical and logical prefixes.
 3. **Translate** — For any canonical path, strip the canonical prefix and prepend the logical prefix.
 4. **Validate** — Round-trip check (`canonicalize(translated) == canonicalize(original)`) to catch prefix mappings broad enough to mistranslate unrelated paths.
-5. **Fall back** — Return the canonical path unchanged if `$PWD` is unset, stale, or the mapping doesn't apply.
+5. **Fall back** — Return the canonical path unchanged if detection fails or the mapping doesn't apply.
 
 > **Note:** The Validate step calls `std::fs::canonicalize()`, which requires the path to exist on disk. Translation of paths to non-existent files will always fall back to returning the input unchanged.
 
@@ -101,7 +102,7 @@ Any Rust CLI tool that:
 - Displays filesystem paths to users
 - Compares paths from different sources (e.g., `git worktree list` output vs the current directory)
 
-Common environments: WSL with mounted VHDs, NFS/network mounts, macOS `/var`/`/tmp`, custom workspace symlinks.
+Common environments: WSL with mounted VHDs, NFS/network mounts, macOS `/var`/`/tmp`, custom workspace symlinks, Windows NTFS junctions, `subst` drives.
 
 ## Documentation
 

@@ -133,12 +133,38 @@ fn print_diagnostics() {
     let ctx = LogicalPathContext::detect();
 
     if ctx.has_mapping() {
-        println!("Symlink prefix mapping detected:");
+        println!("Path indirection prefix mapping detected:");
         println!("  Context: {:?}", ctx);
     } else {
-        println!("No symlink prefix mapping detected.");
-        println!("  $PWD and getcwd() are consistent (or $PWD is unset).");
+        println!("No prefix mapping detected.");
+        println!("  Logical and canonical CWD are consistent (or CWD cannot be determined).");
     }
+}
+```
+
+## Windows: Junction-Aware Path Display
+
+On Windows, junctions and subst drives are detected automatically. The same API works across all platforms:
+
+```rust
+use logical_path::LogicalPathContext;
+use std::path::Path;
+
+fn display_project_path(canonical_path: &Path) {
+    let ctx = LogicalPathContext::detect();
+
+    // On Windows with junction C:\workspace → D:\projects\workspace:
+    //   canonical_path = D:\projects\workspace\src\main.rs
+    //   logical_path   = C:\workspace\src\main.rs
+    //
+    // On Unix with symlink /workspace → /mnt/wsl/workspace:
+    //   canonical_path = /mnt/wsl/workspace/src/main.rs
+    //   logical_path   = /workspace/src/main.rs
+    //
+    // On any platform with no indirections:
+    //   logical_path   = canonical_path (unchanged)
+    let logical_path = ctx.to_logical(canonical_path);
+    println!("  {}", logical_path.display());
 }
 ```
 
