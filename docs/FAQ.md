@@ -12,7 +12,7 @@ Rust's standard library resolves symlinks in filesystem paths. When a user is wo
 
 Sometimes you can't. Many tools and APIs return canonical paths:
 
-- `std::env::current_dir()` always returns the canonical path.
+- `std::env::current_dir()` returns the canonical path on Unix (and the logical path on Windows).
 - `git worktree list`, `cargo metadata`, and many other tools return canonical paths.
 - Some filesystem operations require canonical paths for correctness.
 
@@ -33,13 +33,13 @@ Those crates help you *avoid* canonicalization or clean up path syntax. This cra
 
 ### When should I call `detect()`?
 
-Call `detect()` once at program startup and reuse the returned `LogicalPathContext` for the lifetime of the process. The detection reads `$PWD` and `getcwd()`, which are unlikely to change during a single program execution.
+Call `detect()` once at program startup and reuse the returned `LogicalPathContext` for the lifetime of the process. The detection reads the current directory and compares it against its canonical form — these values are unlikely to change during a single program execution.
 
 If your tool changes the current directory during execution, call `detect()` again after the change.
 
 ### Is `detect()` expensive?
 
-No. It reads one environment variable, calls `getcwd()`, performs one `canonicalize()` call for validation, and does a linear scan over path components. This is a few microseconds at most.
+No. On Unix, it reads one environment variable, calls `getcwd()`, and performs one `canonicalize()` call for validation. On Windows, it calls `current_dir()` and `canonicalize()`. In both cases, it finishes with a linear scan over path components. This is a few microseconds at most.
 
 ### Can I share the context across threads?
 
@@ -47,7 +47,9 @@ Yes. `LogicalPathContext` is `Send + Sync`. You can wrap it in `Arc` or store it
 
 ### What happens if `$PWD` is not set?
 
-`detect()` returns a context with no active mapping. All translations return the input path unchanged. No error or panic occurs.
+On Unix, `detect()` returns a context with no active mapping. All translations return the input path unchanged. No error or panic occurs.
+
+On Windows, `$PWD` is not used. Detection relies on `current_dir()` vs `canonicalize()`, which are always available from the OS.
 
 ### What happens if `$PWD` is stale or wrong?
 
@@ -81,15 +83,19 @@ The crate detects one prefix mapping per `LogicalPathContext`: the divergence be
 
 `Path::components()` normalizes `.` (current directory) components. However, `..` (parent directory) is preserved as a literal component — it is not resolved against the filesystem during suffix matching. Paths with `..` may not match as expected. For best results, pass clean absolute paths.
 
-### What about case-insensitive filesystems (macOS)?
+### What about case-insensitive filesystems (macOS, Windows)?
 
-The crate performs exact byte comparison. On case-insensitive filesystems (macOS APFS default), `$PWD` and `getcwd()` will use consistent casing, so detection works correctly. However, if you compare translated paths against paths from other sources, you may need to normalize casing yourself.
+On **macOS**, the crate performs exact byte comparison for path component matching. Since `$PWD` and `getcwd()` use consistent casing, detection works correctly. If you compare translated paths against paths from other sources, you may need to normalize casing yourself.
+
+On **Windows**, the crate uses ordinal case-insensitive comparison (`OsStr::eq_ignore_ascii_case()`) for path component matching during suffix analysis. This matches NTFS behavior and ensures that paths like `C:\Workspace` and `C:\workspace` are recognized as the same component. Translated paths preserve the original casing from their source.
 
 ## Platform Questions
 
 ### Does it work on Windows?
 
-The crate compiles and runs on Windows, but `detect()` always returns no mapping because Windows has no direct `$PWD` equivalent. All translations pass through unchanged. It is safe to use the crate on Windows — it simply does nothing.
+Yes. The crate detects NTFS junctions, directory symlinks (`mklink /D`), `subst` drives, and mapped network drives on Windows. Detection compares `current_dir()` (which preserves indirections) against `canonicalize()` (which resolves to the physical path, with the `\\?\` prefix stripped). Path comparison on Windows is ordinal case-insensitive, matching NTFS behavior.
+
+See [Platform Behavior — Windows](platform-behavior.md#windows) for details.
 
 ### Does it work on macOS?
 
@@ -97,7 +103,7 @@ Yes, and macOS is one of the primary motivating platforms. macOS has system-leve
 
 ### Does it work in containers/Docker?
 
-Yes, as long as the container's shell sets `$PWD` correctly and there are symlinks in effect. The detection algorithm works purely from environment state — it doesn't depend on any specific OS feature beyond `$PWD` and `getcwd()`.
+Yes, as long as the container's shell sets `$PWD` correctly and there are symlinks in effect. The detection algorithm works purely from environment state — on Unix it reads `$PWD` and calls `getcwd()`, and on Windows it compares `current_dir()` against `canonicalize()`.
 
 ## Design Questions
 

@@ -3,11 +3,11 @@
 //! Translate canonical (symlink-resolved) filesystem paths back to their
 //! logical (symlink-preserving) equivalents.
 //!
-//! When a shell's current directory traverses a symlink, two different paths
-//! refer to the same location: the **logical** path (from `$PWD`, preserving
-//! the symlink) and the **canonical** path (from `getcwd()`, with symlinks
-//! resolved). This crate detects that mapping and provides bidirectional
-//! translation.
+//! When a shell's current directory traverses a symlink (Unix) or an NTFS
+//! junction, directory symlink, or subst drive (Windows), two different paths
+//! refer to the same location: the **logical** path (preserving the
+//! indirection) and the **canonical** path (with all indirections resolved).
+//! This crate detects that mapping and provides bidirectional translation.
 //!
 //! # Quick Start
 //!
@@ -30,8 +30,11 @@
 //!   symlink prefix mappings.
 //! - **macOS**: System symlinks like `/var` → `/private/var` are handled
 //!   automatically by the generic suffix-matching algorithm.
-//! - **Windows**: `detect()` returns no active mapping; all translations return
-//!   the input unchanged.
+//! - **Windows**: Compares `current_dir()` (preserves junctions, subst drives)
+//!   against `canonicalize()` (resolves to physical path) to detect NTFS
+//!   junction, directory symlink, subst drive, and mapped drive mappings.
+//!   The `\\?\` Extended Length Path prefix returned by `canonicalize()` is
+//!   stripped before comparison.
 
 #[cfg(not(windows))]
 use std::ffi::OsStr;
@@ -50,8 +53,10 @@ use std::path::{Path, PathBuf};
 ///
 /// - **Linux/macOS**: Reads `$PWD` and compares against `getcwd()` to detect
 ///   symlink prefix mappings.
-/// - **Windows**: Always reports no active mapping (`$PWD` has no OS-level
-///   equivalent). All translations fall back to returning the input unchanged.
+/// - **Windows**: Compares `current_dir()` (preserves junctions, subst drives,
+///   mapped drives) against `canonicalize()` (resolves to physical path) to
+///   detect NTFS junction, directory symlink, subst drive, and mapped drive
+///   mappings. The `\\?\` prefix is stripped before comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogicalPathContext {
     mapping: Option<PrefixMapping>,
@@ -76,15 +81,19 @@ impl Default for LogicalPathContext {
 }
 
 impl LogicalPathContext {
-    /// Detect the active symlink prefix mapping by comparing `$PWD` (logical)
-    /// against `getcwd()` (canonical).
+    /// Detect the active prefix mapping by comparing logical and canonical
+    /// current working directory paths.
+    ///
+    /// - **Unix**: Compares `$PWD` (logical) against `getcwd()` (canonical).
+    /// - **Windows**: Compares `current_dir()` (logical, preserves junctions/subst)
+    ///   against `canonicalize(current_dir())` (canonical, physical path) with
+    ///   `\\?\` prefix stripped.
     ///
     /// Returns a context with no active mapping when:
-    /// - `$PWD` is unset
-    /// - `$PWD` equals the canonical CWD (no symlink in effect)
-    /// - `$PWD` is stale (points to a non-existent directory)
+    /// - `$PWD` is unset (Unix)
+    /// - The logical and canonical CWD are identical (no indirection in effect)
+    /// - `$PWD` is stale (Unix: points to a non-existent directory)
     /// - The current directory cannot be determined
-    /// - Running on Windows
     ///
     /// # Panics
     ///
@@ -93,7 +102,29 @@ impl LogicalPathContext {
     pub fn detect() -> LogicalPathContext {
         #[cfg(windows)]
         {
-            LogicalPathContext { mapping: None }
+            let cwd = match std::env::current_dir() {
+                Ok(cwd) => cwd,
+                Err(e) => {
+                    log::debug!("detect: current_dir() failed: {e}");
+                    return LogicalPathContext { mapping: None };
+                }
+            };
+
+            let canonical_cwd = match std::fs::canonicalize(&cwd) {
+                Ok(c) => strip_extended_length_prefix(&c),
+                Err(e) => {
+                    log::debug!("detect: canonicalize({}) failed: {e}", cwd.display());
+                    return LogicalPathContext { mapping: None };
+                }
+            };
+
+            log::trace!(
+                "detect (Windows): cwd={}, canonical_cwd={}",
+                cwd.display(),
+                canonical_cwd.display()
+            );
+
+            Self::detect_from_cwd(&cwd, &canonical_cwd)
         }
 
         #[cfg(not(windows))]
@@ -101,8 +132,16 @@ impl LogicalPathContext {
             let pwd = std::env::var_os("PWD");
             let canonical_cwd = match std::env::current_dir() {
                 Ok(cwd) => cwd,
-                Err(_) => return LogicalPathContext { mapping: None },
+                Err(e) => {
+                    log::debug!("detect: current_dir() failed: {e}");
+                    return LogicalPathContext { mapping: None };
+                }
             };
+            log::trace!(
+                "detect (Unix): PWD={:?}, canonical_cwd={}",
+                pwd,
+                canonical_cwd.display()
+            );
             Self::detect_from(pwd.as_deref(), &canonical_cwd)
         }
     }
@@ -113,11 +152,15 @@ impl LogicalPathContext {
     pub(crate) fn detect_from(pwd: Option<&OsStr>, canonical_cwd: &Path) -> LogicalPathContext {
         let pwd = match pwd {
             Some(p) if !p.is_empty() => Path::new(p),
-            _ => return LogicalPathContext { mapping: None },
+            _ => {
+                log::trace!("detect_from: PWD is unset or empty, no mapping");
+                return LogicalPathContext { mapping: None };
+            }
         };
 
         // If pwd and canonical CWD are identical, no mapping needed
         if pwd == canonical_cwd {
+            log::trace!("detect_from: PWD == canonical CWD, no mapping");
             return LogicalPathContext { mapping: None };
         }
 
@@ -125,17 +168,61 @@ impl LogicalPathContext {
         // values (non-existent directories) and divergent $PWD assignments.
         match std::fs::canonicalize(pwd) {
             Ok(canonical_pwd) if canonical_pwd == canonical_cwd => {}
-            _ => return LogicalPathContext { mapping: None },
+            _ => {
+                log::trace!("detect_from: PWD validation failed (stale or divergent), no mapping");
+                return LogicalPathContext { mapping: None };
+            }
         }
 
         match find_divergence_point(canonical_cwd, pwd) {
-            Some((canonical_prefix, logical_prefix)) => LogicalPathContext {
-                mapping: Some(PrefixMapping {
-                    canonical_prefix,
-                    logical_prefix,
-                }),
-            },
-            None => LogicalPathContext { mapping: None },
+            Some((canonical_prefix, logical_prefix)) => {
+                log::debug!(
+                    "detect_from: mapping detected: {} → {}",
+                    canonical_prefix.display(),
+                    logical_prefix.display()
+                );
+                LogicalPathContext {
+                    mapping: Some(PrefixMapping {
+                        canonical_prefix,
+                        logical_prefix,
+                    }),
+                }
+            }
+            None => {
+                log::trace!("detect_from: no divergence found");
+                LogicalPathContext { mapping: None }
+            }
+        }
+    }
+
+    /// Internal helper for Windows testability: takes the CWD and its
+    /// canonicalized form as parameters instead of reading from global
+    /// process state.
+    #[cfg(windows)]
+    pub(crate) fn detect_from_cwd(cwd: &Path, canonical_cwd: &Path) -> LogicalPathContext {
+        if cwd == canonical_cwd {
+            log::trace!("detect_from_cwd: cwd == canonical_cwd, no mapping");
+            return LogicalPathContext { mapping: None };
+        }
+
+        match find_divergence_point(canonical_cwd, cwd) {
+            Some((canonical_prefix, logical_prefix)) => {
+                log::debug!(
+                    "detect_from_cwd: mapping detected: {} → {}",
+                    canonical_prefix.display(),
+                    logical_prefix.display()
+                );
+                LogicalPathContext {
+                    mapping: Some(PrefixMapping {
+                        canonical_prefix,
+                        logical_prefix,
+                    }),
+                }
+            }
+            None => {
+                log::trace!("detect_from_cwd: no divergence found");
+                LogicalPathContext { mapping: None }
+            }
         }
     }
 
@@ -201,11 +288,15 @@ impl LogicalPathContext {
         // No mapping → return input unchanged
         let mapping = match &self.mapping {
             Some(m) => m,
-            None => return fallback,
+            None => {
+                log::trace!("translate: no mapping, returning input unchanged");
+                return fallback;
+            }
         };
 
         // Relative paths → return input unchanged
         if path.is_relative() {
+            log::trace!("translate: relative path, returning input unchanged");
             return fallback;
         }
 
@@ -216,10 +307,27 @@ impl LogicalPathContext {
             }
         };
 
+        // On Windows, strip the \\?\ prefix only for prefix matching.
+        // Keep the original `path` and `fallback` unchanged so callers get
+        // back the exact input on no-op paths, and so any later operations
+        // in this function can still use the original path.
+        #[cfg(windows)]
+        let path_for_match_buf = strip_extended_length_prefix(path);
+        #[cfg(windows)]
+        let path_for_match = path_for_match_buf.as_path();
+        #[cfg(not(windows))]
+        let path_for_match = path;
+
         // Path must start with the source prefix
-        let suffix = match path.strip_prefix(from_prefix) {
+        let suffix = match path_for_match.strip_prefix(from_prefix) {
             Ok(s) => s,
-            Err(_) => return fallback,
+            Err(_) => {
+                log::trace!(
+                    "translate: path does not start with source prefix ({}), returning unchanged",
+                    from_prefix.display()
+                );
+                return fallback;
+            }
         };
 
         let translated = to_prefix.join(suffix);
@@ -227,16 +335,39 @@ impl LogicalPathContext {
         // Round-trip validation: canonicalize both and compare
         let original_canonical = match std::fs::canonicalize(path) {
             Ok(c) => c,
-            Err(_) => return fallback,
+            Err(e) => {
+                log::trace!(
+                    "translate: canonicalize({}) failed: {e}, returning unchanged",
+                    path.display()
+                );
+                return fallback;
+            }
         };
         let translated_canonical = match std::fs::canonicalize(&translated) {
             Ok(c) => c,
-            Err(_) => return fallback,
+            Err(e) => {
+                log::trace!(
+                    "translate: canonicalize({}) failed: {e}, returning unchanged",
+                    translated.display()
+                );
+                return fallback;
+            }
         };
+
+        // On Windows, strip \\?\ prefix from canonicalized paths before comparison
+        #[cfg(windows)]
+        let original_canonical = strip_extended_length_prefix(&original_canonical);
+        #[cfg(windows)]
+        let translated_canonical = strip_extended_length_prefix(&translated_canonical);
 
         if original_canonical == translated_canonical {
             translated
         } else {
+            log::trace!(
+                "translate: round-trip validation failed ({} != {}), returning unchanged",
+                original_canonical.display(),
+                translated_canonical.display()
+            );
             fallback
         }
     }
@@ -247,13 +378,60 @@ enum TranslationDirection {
     ToCanonical,
 }
 
+/// Strip the `\\?\` Extended Length Path prefix from Windows paths.
+///
+/// - `\\?\C:\...` → `C:\...`
+/// - `\\?\UNC\server\share\...` → `\\server\share\...`
+/// - All other paths → returned unchanged
+#[cfg(windows)]
+fn strip_extended_length_prefix(path: &Path) -> PathBuf {
+    let s = match path.to_str() {
+        Some(s) => s,
+        None => return path.to_path_buf(),
+    };
+
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        // Only strip if followed by a drive letter and colon
+        let mut chars = rest.chars();
+        if let Some(drive) = chars.next() {
+            if drive.is_ascii_alphabetic() {
+                if let Some(':') = chars.next() {
+                    return PathBuf::from(rest);
+                }
+            }
+        }
+    }
+
+    path.to_path_buf()
+}
+
+/// Compare two path components for equality.
+///
+/// - **Unix**: Case-sensitive comparison (`==`)
+/// - **Windows**: Ordinal case-insensitive comparison (`eq_ignore_ascii_case`)
+fn components_equal(a: &std::path::Component<'_>, b: &std::path::Component<'_>) -> bool {
+    #[cfg(windows)]
+    {
+        a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
 /// Find the divergence point between a canonical path and a logical path
 /// by comparing path components from the end (longest common suffix).
 ///
-/// Returns `Some((canonical_prefix, logical_prefix))` if the paths share a
-/// common suffix but differ in their prefixes. Returns `None` if the paths
-/// are identical or share no common suffix components.
-#[cfg(not(windows))]
+/// Returns `Some((canonical_prefix, logical_prefix))` if the paths differ.
+/// When the paths share a common suffix, returns the differing prefixes.
+/// When no common suffix exists, returns the full paths as the mapping
+/// (supporting cases where CWD is exactly at the mapping point).
+/// Returns `None` if the paths are identical.
 fn find_divergence_point(canonical: &Path, logical: &Path) -> Option<(PathBuf, PathBuf)> {
     let canonical_components: Vec<_> = canonical.components().collect();
     let logical_components: Vec<_> = logical.components().collect();
@@ -265,13 +443,19 @@ fn find_divergence_point(canonical: &Path, logical: &Path) -> Option<(PathBuf, P
 
     loop {
         match (c_iter.next(), l_iter.next()) {
-            (Some(c), Some(l)) if c == l => common_suffix_len += 1,
+            (Some(c), Some(l)) if components_equal(c, l) => common_suffix_len += 1,
             _ => break,
         }
     }
 
     if common_suffix_len == 0 {
-        return None;
+        // No common suffix — the entire paths form the mapping.
+        // This happens on Windows when CWD is exactly at the mapping point
+        // (e.g., junction root, subst drive root, directory symlink root).
+        if canonical == logical {
+            return None;
+        }
+        return Some((canonical.to_path_buf(), logical.to_path_buf()));
     }
 
     let canonical_prefix_len = canonical_components.len() - common_suffix_len;
@@ -333,7 +517,7 @@ mod tests {
     }
 
     // T009: find_divergence_point tests
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_identical_paths_returns_none() {
         let result = find_divergence_point(
@@ -343,7 +527,7 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_common_suffix_different_prefixes() {
         let result = find_divergence_point(
@@ -358,14 +542,20 @@ mod tests {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
-    fn divergence_no_common_components_returns_none() {
+    fn divergence_no_common_components_returns_full_paths() {
+        // When paths share no common suffix, the entire paths form the mapping.
+        // This supports cases where CWD is exactly at the mapping point
+        // (e.g., a symlink root on Unix or a junction root on Windows).
         let result = find_divergence_point(Path::new("/a/b/c"), Path::new("/x/y/z"));
-        assert_eq!(result, None);
+        assert_eq!(
+            result,
+            Some((PathBuf::from("/a/b/c"), PathBuf::from("/x/y/z")))
+        );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_trailing_slashes() {
         // Path::components() normalizes trailing slashes
@@ -379,7 +569,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_dot_components() {
         // Path::components() normalizes `.` (CurDir)
@@ -393,7 +583,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_dotdot_components() {
         // `..` is preserved as a component by Path::components() — it doesn't
@@ -413,7 +603,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_redundant_separators() {
         // Path::components() normalizes redundant separators
@@ -427,7 +617,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn divergence_macos_private_prefix() {
         let result = find_divergence_point(
@@ -823,5 +1013,173 @@ mod tests {
                 subdir
             );
         }
+    }
+
+    // ===== Windows-specific unit tests =====
+
+    // T003: strip_extended_length_prefix tests
+    #[cfg(windows)]
+    #[test]
+    fn strip_prefix_drive_letter() {
+        let result = strip_extended_length_prefix(Path::new(r"\\?\C:\Users\dev"));
+        assert_eq!(result, PathBuf::from(r"C:\Users\dev"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strip_prefix_unc() {
+        let result = strip_extended_length_prefix(Path::new(r"\\?\UNC\server\share\folder"));
+        assert_eq!(result, PathBuf::from(r"\\server\share\folder"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strip_prefix_no_prefix_unchanged() {
+        let result = strip_extended_length_prefix(Path::new(r"C:\Users\dev"));
+        assert_eq!(result, PathBuf::from(r"C:\Users\dev"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strip_prefix_empty_unchanged() {
+        let result = strip_extended_length_prefix(Path::new(""));
+        assert_eq!(result, PathBuf::from(""));
+    }
+
+    // T005: case-insensitive find_divergence_point on Windows
+    #[cfg(windows)]
+    #[test]
+    fn divergence_case_insensitive_matching_components() {
+        // Same components differing only in case should match → no divergence
+        let result = find_divergence_point(
+            Path::new(r"C:\Users\Dev\Project"),
+            Path::new(r"C:\users\dev\project"),
+        );
+        assert_eq!(result, None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn divergence_windows_junction_like_paths() {
+        // Junction-like: D:\Projects\Workspace\src vs C:\workspace\src
+        // Common suffix (case-insensitive): workspace\src
+        let result = find_divergence_point(
+            Path::new(r"D:\Projects\Workspace\src"),
+            Path::new(r"C:\workspace\src"),
+        );
+        assert_eq!(
+            result,
+            Some((PathBuf::from(r"D:\Projects"), PathBuf::from(r"C:\")))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn divergence_windows_identical_paths() {
+        let result = find_divergence_point(
+            Path::new(r"C:\Users\dev\project"),
+            Path::new(r"C:\Users\dev\project"),
+        );
+        assert_eq!(result, None);
+    }
+
+    // T007: detect_from_cwd tests
+    #[cfg(windows)]
+    #[test]
+    fn detect_from_cwd_equal_paths_no_mapping() {
+        let ctx = LogicalPathContext::detect_from_cwd(
+            Path::new(r"C:\Users\dev\project"),
+            Path::new(r"C:\Users\dev\project"),
+        );
+        assert!(!ctx.has_mapping());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn detect_from_cwd_different_paths_with_common_suffix() {
+        let ctx = LogicalPathContext::detect_from_cwd(
+            Path::new(r"S:\workspace\src"),
+            Path::new(r"D:\projects\workspace\src"),
+        );
+        assert!(ctx.has_mapping());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn detect_from_cwd_different_paths_no_common_suffix() {
+        // When paths share no common suffix (e.g., subst drive root mapped to
+        // a deep physical path), the entire paths form the prefix mapping.
+        let ctx = LogicalPathContext::detect_from_cwd(
+            Path::new(r"X:\completely\different"),
+            Path::new(r"Y:\totally\unrelated"),
+        );
+        assert!(ctx.has_mapping());
+    }
+
+    // T010a: to_logical with \\?\-prefixed canonical path on Windows
+    #[cfg(windows)]
+    #[test]
+    fn to_logical_strips_extended_prefix_from_input() {
+        // Use real filesystem paths so canonicalize() round-trip succeeds.
+        // On Windows, std::fs::canonicalize() returns \\?\-prefixed paths,
+        // so we strip that prefix for the mapping (as detect_from_cwd does).
+        let dir = tempfile::tempdir().unwrap();
+        let canonical_base = std::fs::canonicalize(dir.path()).unwrap();
+        let real_dir = canonical_base.join("real");
+        let link_dir = canonical_base.join("link");
+
+        // Strip \\?\ for the mapping (detect_from_cwd uses stripped paths)
+        let real_dir_stripped = strip_extended_length_prefix(&real_dir);
+        let link_dir_stripped = strip_extended_length_prefix(&link_dir);
+
+        std::fs::create_dir_all(real_dir.join("src")).unwrap();
+
+        // Create an NTFS junction: link_dir -> real_dir
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link_dir)
+            .arg(&real_dir)
+            .output()
+            .expect("mklink /J");
+        assert!(status.status.success(), "mklink /J failed");
+
+        let ctx = ctx_with_mapping(&real_dir_stripped, &link_dir_stripped);
+
+        // The caller provides a \\?\-prefixed canonical path (FR-008).
+        // real_dir already has the \\?\ prefix from canonicalize().
+        let input = real_dir.join("src");
+        let result = ctx.to_logical(&input);
+        assert_eq!(result, link_dir_stripped.join("src"));
+
+        // Clean up junction
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "rd"])
+            .arg(&link_dir)
+            .output();
+    }
+
+    // T021: detect_from_cwd fallback with identical paths
+    #[cfg(windows)]
+    #[test]
+    fn detect_from_cwd_identical_returns_fallback() {
+        let path = Path::new(r"C:\Users\dev\project");
+        let ctx = LogicalPathContext::detect_from_cwd(path, path);
+        assert!(!ctx.has_mapping());
+
+        // to_logical and to_canonical return input unchanged
+        let input = Path::new(r"C:\Users\dev\project\src\main.rs");
+        assert_eq!(ctx.to_logical(input), input.to_path_buf());
+        assert_eq!(ctx.to_canonical(input), input.to_path_buf());
+    }
+
+    // T022: relative paths on Windows return unchanged
+    #[cfg(windows)]
+    #[test]
+    fn windows_relative_path_returns_unchanged() {
+        let ctx = ctx_with_mapping(r"D:\projects\workspace", r"C:\workspace");
+
+        let input = Path::new(r"src\main.rs");
+        assert_eq!(ctx.to_logical(input), input.to_path_buf());
+        assert_eq!(ctx.to_canonical(input), input.to_path_buf());
     }
 }
