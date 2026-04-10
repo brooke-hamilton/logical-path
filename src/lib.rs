@@ -1104,11 +1104,17 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn to_logical_strips_extended_prefix_from_input() {
-        // Use real filesystem paths so canonicalize() round-trip succeeds
+        // Use real filesystem paths so canonicalize() round-trip succeeds.
+        // On Windows, std::fs::canonicalize() returns \\?\-prefixed paths,
+        // so we strip that prefix for the mapping (as detect_from_cwd does).
         let dir = tempfile::tempdir().unwrap();
         let canonical_base = std::fs::canonicalize(dir.path()).unwrap();
         let real_dir = canonical_base.join("real");
         let link_dir = canonical_base.join("link");
+
+        // Strip \\?\ for the mapping (detect_from_cwd uses stripped paths)
+        let real_dir_stripped = strip_extended_length_prefix(&real_dir);
+        let link_dir_stripped = strip_extended_length_prefix(&link_dir);
 
         std::fs::create_dir_all(real_dir.join("src")).unwrap();
 
@@ -1121,15 +1127,13 @@ mod tests {
             .expect("mklink /J");
         assert!(status.status.success(), "mklink /J failed");
 
-        let ctx = ctx_with_mapping(&real_dir, &link_dir);
+        let ctx = ctx_with_mapping(&real_dir_stripped, &link_dir_stripped);
 
-        // The caller provides a \\?\-prefixed canonical path (FR-008)
-        let prefixed_input = PathBuf::from(format!(
-            r"\\?\{}",
-            real_dir.join("src").to_str().unwrap()
-        ));
-        let result = ctx.to_logical(&prefixed_input);
-        assert_eq!(result, link_dir.join("src"));
+        // The caller provides a \\?\-prefixed canonical path (FR-008).
+        // real_dir already has the \\?\ prefix from canonicalize().
+        let input = real_dir.join("src");
+        let result = ctx.to_logical(&input);
+        assert_eq!(result, link_dir_stripped.join("src"));
 
         // Clean up junction
         let _ = std::process::Command::new("cmd")
