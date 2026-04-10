@@ -167,7 +167,7 @@ The following items are explicitly excluded from this feature:
 - **FR-010**: All existing public API contracts MUST be preserved: `detect()` returns `LogicalPathContext`, `to_logical()` and `to_canonical()` return `PathBuf`, `has_mapping()` returns `bool`, and no method panics or returns an error type.
 - **FR-011**: All platform-specific code paths MUST be gated with conditional compilation attributes (`#[cfg(windows)]`, `#[cfg(not(windows))]`, `#[cfg(unix)]`, etc.).
 - **FR-012**: The library MUST compile and all tests MUST pass on Linux, macOS, and Windows.
-- **FR-013**: The library MUST emit trace-level diagnostic messages (via the `log` or `tracing` crate) at key detection and translation decision points. At minimum, diagnostics MUST cover: (a) the `current_dir()` and `canonicalize()` values compared during detection, (b) whether a mapping was detected and the prefix pair, (c) fallback reasons when round-trip validation fails or no mapping applies. These diagnostics MUST be at `trace` or `debug` level and incur zero overhead when no subscriber/logger is active.
+- **FR-013**: The library MUST emit trace-level diagnostic messages (via the `log` crate) at key detection and translation decision points. At minimum, diagnostics MUST cover: (a) the `current_dir()` and `canonicalize()` values compared during detection, (b) whether a mapping was detected and the prefix pair, (c) fallback reasons when round-trip validation fails or no mapping applies. These diagnostics MUST be at `trace` or `debug` level and incur zero overhead when no subscriber/logger is active.
 
 ### Key Entities
 
@@ -188,7 +188,7 @@ The following items are explicitly excluded from this feature:
 - **SC-005**: The round-trip property holds for translated paths on Windows: translating canonical to logical and back yields the original canonical path — verified by parameterized tests covering junctions and subst drives.
 - **SC-006**: All existing Linux and macOS tests continue to pass without modification after the Windows changes are merged.
 - **SC-007**: Case-insensitive path comparison on Windows correctly identifies mappings even when casing differs between the working directory path and the resolved path — verified by a test with mixed-case junction or subst paths.
-- **SC-008**: The library adds no new unconditional dependencies for the Windows detection logic. Platform-gated conditional dependencies (e.g., `windows-sys` behind `#[cfg(windows)]`) are acceptable if needed for OS API access, but the dependency footprint on non-Windows platforms MUST remain unchanged.
+- **SC-008**: The library adds no new unconditional dependencies for the Windows detection logic. Platform-gated conditional dependencies (e.g., `windows-sys` behind `#[cfg(windows)]`) are acceptable if needed for OS API access. A lightweight logging facade (`log`) is acceptable as a cross-platform diagnostic dependency (FR-013). Beyond `log`, the dependency footprint on non-Windows platforms MUST remain unchanged.
 - **SC-009**: Trace-level diagnostics are emitted during detection and fallback — verified by enabling a `tracing` or `log` subscriber in a test, running `detect()` and `to_logical()`, and asserting that relevant diagnostic messages are captured.
 
 ## Assumptions
