@@ -11,6 +11,7 @@ keywords = ["symlink", "path", "canonical", "logical", "pwd"]
 categories = ["filesystem", "command-line-utilities"]
 
 [dependencies]
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

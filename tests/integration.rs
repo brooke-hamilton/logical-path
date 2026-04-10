@@ -245,14 +245,519 @@ fn detect_with_real_symlink_on_linux() {
 }
 
 // T038: Platform-gated test for Windows
+// This test is removed/updated per T032 — Windows detect() now returns mappings
+// when indirections exist. The old no-op test is replaced by the comprehensive
+// Windows integration tests below.
+
+// ===== Windows Integration Test Infrastructure (T012) =====
+
+#[cfg(windows)]
+mod windows_helpers {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    /// Create an NTFS junction from `link` to `target` via `cmd /c mklink /J`.
+    pub fn create_junction(link: &Path, target: &Path) -> std::io::Result<()> {
+        let output = Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "mklink /J failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ))
+        }
+    }
+
+    /// Create a directory symlink from `link` to `target` via `cmd /c mklink /D`.
+    pub fn create_dir_symlink(link: &Path, target: &Path) -> std::io::Result<()> {
+        let output = Command::new("cmd")
+            .args(["/c", "mklink", "/D"])
+            .arg(link)
+            .arg(target)
+            .output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "mklink /D failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ))
+        }
+    }
+
+    /// Remove an NTFS junction via `cmd /c rd`.
+    pub fn remove_junction(link: &Path) -> std::io::Result<()> {
+        let output = Command::new("cmd").args(["/c", "rd"]).arg(link).output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("rd failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ))
+        }
+    }
+
+    /// Create a subst drive mapping from `letter` to `target`.
+    pub fn create_subst(letter: char, target: &Path) -> std::io::Result<()> {
+        let output = Command::new("subst")
+            .arg(format!("{letter}:"))
+            .arg(target)
+            .output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("subst failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ))
+        }
+    }
+
+    /// Remove a subst drive mapping.
+    pub fn remove_subst(letter: char) -> std::io::Result<()> {
+        let output = Command::new("subst")
+            .arg(format!("{letter}:"))
+            .arg("/D")
+            .output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "subst /D failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ))
+        }
+    }
+
+    /// RAII guard that saves/restores CWD and cleans up junctions/subst drives on drop.
+    pub struct WinEnvGuard {
+        saved_dir: PathBuf,
+        junctions: Vec<PathBuf>,
+        subst_drives: Vec<char>,
+    }
+
+    impl WinEnvGuard {
+        pub fn new() -> Self {
+            WinEnvGuard {
+                saved_dir: std::env::current_dir().expect("current_dir"),
+                junctions: Vec::new(),
+                subst_drives: Vec::new(),
+            }
+        }
+
+        pub fn track_junction(&mut self, link: PathBuf) {
+            self.junctions.push(link);
+        }
+
+        pub fn track_subst(&mut self, letter: char) {
+            self.subst_drives.push(letter);
+        }
+
+        pub fn set_cwd(&self, dir: &Path) {
+            std::env::set_current_dir(dir).expect("set_current_dir");
+        }
+    }
+
+    impl Drop for WinEnvGuard {
+        fn drop(&mut self) {
+            // Restore CWD first so junctions/subst can be removed
+            let _ = std::env::set_current_dir(&self.saved_dir);
+            for junction in &self.junctions {
+                let _ = remove_junction(junction);
+            }
+            for &letter in &self.subst_drives {
+                let _ = remove_subst(letter);
+            }
+        }
+    }
+}
+
+// ===== Phase 3: US1 — NTFS Junction and Directory Symlink Detection =====
+
+// T013: Junction detection
 #[cfg(windows)]
 #[test]
-fn detect_returns_no_mapping_on_windows() {
+fn detect_junction_has_mapping() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("link");
+
+    std::fs::create_dir_all(&real_dir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+    assert!(ctx.has_mapping());
+}
+
+// T014: Junction to_logical translation
+#[cfg(windows)]
+#[test]
+fn detect_junction_to_logical() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("link");
+    let subdir = real_dir.join("src");
+
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+    let canonical = real_dir.join("src");
+    let result = ctx.to_logical(&canonical);
+    assert_eq!(result, link_dir.join("src"));
+}
+
+// T015: No junction → no mapping (end-to-end)
+#[cfg(windows)]
+#[test]
+fn detect_no_junction_no_mapping() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    std::env::set_current_dir(&base).expect("set_current_dir");
+
     let ctx = LogicalPathContext::detect();
     assert!(!ctx.has_mapping());
 
-    // All translations return input unchanged
-    let path = std::path::Path::new("C:\\Users\\user\\project\\src\\main.rs");
-    assert_eq!(ctx.to_logical(path), path.to_path_buf());
-    assert_eq!(ctx.to_canonical(path), path.to_path_buf());
+    // Restore CWD
+    let _ = std::env::set_current_dir(std::env::temp_dir());
+}
+
+// T016: Junction removed after detect → fallback
+#[cfg(windows)]
+#[test]
+fn detect_junction_removed_fallback() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("link");
+    let subdir = real_dir.join("src");
+
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+
+    // Move CWD away so junction can be removed
+    guard.set_cwd(&base);
+    remove_junction(&link_dir).expect("remove junction");
+    guard.junctions.retain(|j| j != &link_dir);
+
+    // to_logical should fall back since round-trip validation fails
+    let canonical = real_dir.join("src");
+    let result = ctx.to_logical(&canonical);
+    assert_eq!(result, canonical);
+}
+
+// T016a: Directory symlink detection
+#[cfg(windows)]
+#[test]
+fn detect_dir_symlink_has_mapping() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("symlink");
+
+    std::fs::create_dir_all(&real_dir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    if create_dir_symlink(&link_dir, &real_dir).is_err() {
+        // Skip if directory symlinks require elevation
+        return;
+    }
+    guard.track_junction(link_dir.clone()); // rd works for dir symlinks too
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+    assert!(ctx.has_mapping());
+
+    let canonical = real_dir.join("file.txt");
+    std::fs::write(&canonical, b"test").unwrap();
+    let result = ctx.to_logical(&canonical);
+    assert_eq!(result, link_dir.join("file.txt"));
+}
+
+// T016b: Junction round-trip (SC-005)
+#[cfg(windows)]
+#[test]
+fn junction_roundtrip() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("link");
+    let subdir = real_dir.join("src");
+
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+    let canonical = real_dir.join("src");
+    let logical = ctx.to_logical(&canonical);
+    let back = ctx.to_canonical(&logical);
+    assert_eq!(back, canonical);
+}
+
+// ===== Phase 4: US2 — Subst Drive Detection =====
+
+// T017: Subst drive detection
+#[cfg(windows)]
+#[test]
+fn detect_subst_has_mapping() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    // Use Z: as the subst drive letter
+    if create_subst('Z', &base).is_err() {
+        return; // Skip if Z: is already in use
+    }
+    guard.track_subst('Z');
+    guard.set_cwd(std::path::Path::new(r"Z:\"));
+
+    let ctx = LogicalPathContext::detect();
+    assert!(ctx.has_mapping());
+}
+
+// T018: Subst to_logical translation
+#[cfg(windows)]
+#[test]
+fn detect_subst_to_logical() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let subdir = base.join("src");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    if create_subst('Z', &base).is_err() {
+        return;
+    }
+    guard.track_subst('Z');
+    guard.set_cwd(std::path::Path::new(r"Z:\"));
+
+    let ctx = LogicalPathContext::detect();
+    let canonical = subdir;
+    let result = ctx.to_logical(&canonical);
+    assert_eq!(result, std::path::PathBuf::from(r"Z:\src"));
+}
+
+// T019: Subst to_logical with path outside mapping
+#[cfg(windows)]
+#[test]
+fn subst_to_logical_outside_mapping() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    if create_subst('Z', &base).is_err() {
+        return;
+    }
+    guard.track_subst('Z');
+    guard.set_cwd(std::path::Path::new(r"Z:\"));
+
+    let ctx = LogicalPathContext::detect();
+    let outside = std::path::Path::new(r"C:\Windows\System32");
+    assert_eq!(ctx.to_logical(outside), outside.to_path_buf());
+}
+
+// T020: Subst removed after detect → fallback
+#[cfg(windows)]
+#[test]
+fn subst_removed_fallback() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let subdir = base.join("src");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    if create_subst('Z', &base).is_err() {
+        return;
+    }
+    guard.track_subst('Z');
+    guard.set_cwd(std::path::Path::new(r"Z:\"));
+
+    let ctx = LogicalPathContext::detect();
+
+    // Move CWD away and remove subst
+    guard.set_cwd(&base);
+    let _ = remove_subst('Z');
+    guard.subst_drives.retain(|&d| d != 'Z');
+
+    let result = ctx.to_logical(&subdir);
+    assert_eq!(result, subdir);
+}
+
+// T020a: Subst round-trip (SC-005)
+#[cfg(windows)]
+#[test]
+fn subst_roundtrip() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let subdir = base.join("src");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    if create_subst('Z', &base).is_err() {
+        return;
+    }
+    guard.track_subst('Z');
+    guard.set_cwd(std::path::Path::new(r"Z:\"));
+
+    let ctx = LogicalPathContext::detect();
+    let canonical = subdir;
+    let logical = ctx.to_logical(&canonical);
+    let back = ctx.to_canonical(&logical);
+    assert_eq!(back, canonical);
+}
+
+// ===== Phase 5: US5 — Graceful Fallback on Windows =====
+
+// T023: Junction retargeted → stale mapping → fallback
+#[cfg(windows)]
+#[test]
+fn junction_retarget_fallback() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir1 = base.join("real1");
+    let real_dir2 = base.join("real2");
+    let link_dir = base.join("link");
+    let subdir = real_dir1.join("src");
+
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::create_dir_all(real_dir2.join("src")).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir1).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+
+    // Retarget junction to a different directory
+    guard.set_cwd(&base);
+    remove_junction(&link_dir).expect("remove junction");
+    create_junction(&link_dir, &real_dir2).expect("mklink /J new target");
+
+    // to_logical should fall back — round-trip validation catches stale mapping
+    let canonical = real_dir1.join("src");
+    let result = ctx.to_logical(&canonical);
+    assert_eq!(result, canonical);
+}
+
+// ===== Phase 7: US4 — Translate Logical-to-Canonical on Windows =====
+
+// T026: to_canonical with active junction mapping
+#[cfg(windows)]
+#[test]
+fn junction_to_canonical() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("link");
+    let subdir = real_dir.join("src");
+
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+    let logical = link_dir.join("src");
+    let result = ctx.to_canonical(&logical);
+    assert_eq!(result, real_dir.join("src"));
+}
+
+// T027: to_canonical with path outside junction prefix
+#[cfg(windows)]
+#[test]
+fn junction_to_canonical_outside_prefix() {
+    use windows_helpers::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let real_dir = base.join("real");
+    let link_dir = base.join("link");
+
+    std::fs::create_dir_all(&real_dir).unwrap();
+
+    let mut guard = WinEnvGuard::new();
+    create_junction(&link_dir, &real_dir).expect("mklink /J");
+    guard.track_junction(link_dir.clone());
+    guard.set_cwd(&link_dir);
+
+    let ctx = LogicalPathContext::detect();
+    let outside = std::path::Path::new(r"C:\Windows\System32");
+    assert_eq!(ctx.to_canonical(outside), outside.to_path_buf());
+}
+
+// T028: to_canonical with no mapping
+#[cfg(windows)]
+#[test]
+fn no_mapping_to_canonical_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    std::env::set_current_dir(&base).expect("set_current_dir");
+
+    let ctx = LogicalPathContext::detect();
+    let input = std::path::Path::new(r"C:\Users\dev\project\src\main.rs");
+    assert_eq!(ctx.to_canonical(input), input.to_path_buf());
+
+    let _ = std::env::set_current_dir(std::env::temp_dir());
 }

@@ -82,14 +82,16 @@ fn emit_cd_directive(target: &Path) {
 
 | | Linux | macOS | Windows |
 | --- | ----- | ----- | ------- |
-| Logical path source | `$PWD` | `$PWD` | No direct equivalent |
+| Logical path source | `$PWD` | `$PWD` | `current_dir()` (preserves indirections) |
+| Canonical path source | `getcwd()` | `getcwd()` | `canonicalize()` with `\\?\` stripped |
 | System symlinks | User-created only | `/var`→`/private/var`, `/tmp`→`/private/tmp` | NTFS junctions, directory symlinks |
-| Case sensitivity | Yes | No (APFS default) | No |
-| `canonicalize()` quirks | None | `/private` prefixing | `\\?\` UNC prefix |
+| Other indirections | — | — | `subst` drives, mapped network drives |
+| Case sensitivity | Yes | No (APFS default) | No (ordinal case-insensitive) |
+| `canonicalize()` quirks | None | `/private` prefixing | `\\?\` Extended Length Path prefix |
 
 **macOS note:** System-level symlinks like `/var` → `/private/var` trigger this bug even without any user-created symlinks.
 
-**Windows note:** `$PWD` has no direct OS-level equivalent. `subst` drive and junction detection is a known limitation; follow the tracking issue for updates.
+**Windows note:** Detection works for NTFS junctions, directory symlinks, `subst` drive letters, and mapped network drives via the `current_dir()` vs `canonicalize()` comparison. The `\\?\` Extended Length Path prefix returned by `canonicalize()` is stripped automatically. Path comparison on Windows is ordinal case-insensitive, matching NTFS behavior.
 
 ## Use Cases
 

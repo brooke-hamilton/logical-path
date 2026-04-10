@@ -24,3 +24,9 @@ target
 # Added by cargo
 
 /target
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
