@@ -1104,12 +1104,38 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn to_logical_strips_extended_prefix_from_input() {
-        let ctx = ctx_with_mapping(r"D:\projects\workspace", r"C:\workspace");
+        // Use real filesystem paths so canonicalize() round-trip succeeds
+        let dir = tempfile::tempdir().unwrap();
+        let canonical_base = std::fs::canonicalize(dir.path()).unwrap();
+        let real_dir = canonical_base.join("real");
+        let link_dir = canonical_base.join("link");
 
-        // The caller provides a \\?\-prefixed path (FR-008)
-        let input = Path::new(r"\\?\D:\projects\workspace\src\main.rs");
-        let result = ctx.to_logical(input);
-        assert_eq!(result, PathBuf::from(r"C:\workspace\src\main.rs"));
+        std::fs::create_dir_all(real_dir.join("src")).unwrap();
+
+        // Create an NTFS junction: link_dir -> real_dir
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link_dir)
+            .arg(&real_dir)
+            .output()
+            .expect("mklink /J");
+        assert!(status.status.success(), "mklink /J failed");
+
+        let ctx = ctx_with_mapping(&real_dir, &link_dir);
+
+        // The caller provides a \\?\-prefixed canonical path (FR-008)
+        let prefixed_input = PathBuf::from(format!(
+            r"\\?\{}",
+            real_dir.join("src").to_str().unwrap()
+        ));
+        let result = ctx.to_logical(&prefixed_input);
+        assert_eq!(result, link_dir.join("src"));
+
+        // Clean up junction
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "rd"])
+            .arg(&link_dir)
+            .output();
     }
 
     // T021: detect_from_cwd fallback with identical paths
