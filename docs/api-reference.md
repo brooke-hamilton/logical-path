@@ -38,7 +38,6 @@ Detect the active prefix mapping from the process environment.
 - The logical and canonical CWD are identical (no indirection in effect)
 - `$PWD` is stale (Unix: points to a non-existent directory)
 - `$PWD` doesn't resolve to the same canonical CWD (Unix)
-- No common suffix between the logical and canonical CWD
 - The current directory cannot be determined
 
 **Usage pattern**: Call once at program startup and reuse the context for the lifetime of the process. If the environment changes (e.g., the user `cd`s elsewhere), call `detect()` again.

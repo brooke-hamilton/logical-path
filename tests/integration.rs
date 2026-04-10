@@ -427,6 +427,18 @@ mod windows_helpers {
             }
         }
     }
+
+    /// Find an unused Windows drive letter by checking which root paths (`X:\`) do not exist.
+    ///
+    /// Scans from `Z:` down to `D:` (reverse order) to avoid commonly used drive letters
+    /// like `C:` (system), `A:`/`B:` (floppy legacy), and physical drives that often start
+    /// from `D:`. Returns the first letter whose root path is not currently present, or
+    /// `None` if all candidate letters are already occupied.
+    pub fn find_unused_drive_letter() -> Option<char> {
+        ('D'..='Z')
+            .rev()
+            .find(|&c| !std::path::Path::new(&format!("{c}:\\")).exists())
+    }
 }
 
 // ===== Phase 3: US1 — NTFS Junction and Directory Symlink Detection =====
@@ -593,13 +605,12 @@ fn detect_subst_has_mapping() {
     let dir = tempfile::tempdir().unwrap();
     let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
 
+    let letter =
+        find_unused_drive_letter().expect("no unused drive letter available for subst test");
     let mut guard = WinEnvGuard::new();
-    // Use Z: as the subst drive letter
-    if create_subst('Z', &base).is_err() {
-        return; // Skip if Z: is already in use
-    }
-    guard.track_subst('Z');
-    guard.set_cwd(std::path::Path::new(r"Z:\"));
+    create_subst(letter, &base).expect("subst");
+    guard.track_subst(letter);
+    guard.set_cwd(std::path::Path::new(&format!("{letter}:\\")));
 
     let ctx = LogicalPathContext::detect();
     assert!(ctx.has_mapping());
@@ -616,17 +627,17 @@ fn detect_subst_to_logical() {
     let subdir = base.join("src");
     std::fs::create_dir_all(&subdir).unwrap();
 
+    let letter =
+        find_unused_drive_letter().expect("no unused drive letter available for subst test");
     let mut guard = WinEnvGuard::new();
-    if create_subst('Z', &base).is_err() {
-        return;
-    }
-    guard.track_subst('Z');
-    guard.set_cwd(std::path::Path::new(r"Z:\"));
+    create_subst(letter, &base).expect("subst");
+    guard.track_subst(letter);
+    guard.set_cwd(std::path::Path::new(&format!("{letter}:\\")));
 
     let ctx = LogicalPathContext::detect();
     let canonical = subdir;
     let result = ctx.to_logical(&canonical);
-    assert_eq!(result, std::path::PathBuf::from(r"Z:\src"));
+    assert_eq!(result, std::path::PathBuf::from(format!(r"{letter}:\src")));
 }
 
 // T019: Subst to_logical with path outside mapping
@@ -638,12 +649,12 @@ fn subst_to_logical_outside_mapping() {
     let dir = tempfile::tempdir().unwrap();
     let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
 
+    let letter =
+        find_unused_drive_letter().expect("no unused drive letter available for subst test");
     let mut guard = WinEnvGuard::new();
-    if create_subst('Z', &base).is_err() {
-        return;
-    }
-    guard.track_subst('Z');
-    guard.set_cwd(std::path::Path::new(r"Z:\"));
+    create_subst(letter, &base).expect("subst");
+    guard.track_subst(letter);
+    guard.set_cwd(std::path::Path::new(&format!("{letter}:\\")));
 
     let ctx = LogicalPathContext::detect();
     let outside = std::path::Path::new(r"C:\Windows\System32");
@@ -661,19 +672,19 @@ fn subst_removed_fallback() {
     let subdir = base.join("src");
     std::fs::create_dir_all(&subdir).unwrap();
 
+    let letter =
+        find_unused_drive_letter().expect("no unused drive letter available for subst test");
     let mut guard = WinEnvGuard::new();
-    if create_subst('Z', &base).is_err() {
-        return;
-    }
-    guard.track_subst('Z');
-    guard.set_cwd(std::path::Path::new(r"Z:\"));
+    create_subst(letter, &base).expect("subst");
+    guard.track_subst(letter);
+    guard.set_cwd(std::path::Path::new(&format!("{letter}:\\")));
 
     let ctx = LogicalPathContext::detect();
 
     // Move CWD away and remove subst
     guard.set_cwd(&base);
-    let _ = remove_subst('Z');
-    guard.untrack_subst('Z');
+    let _ = remove_subst(letter);
+    guard.untrack_subst(letter);
 
     let result = ctx.to_logical(&subdir);
     assert_eq!(result, subdir);
@@ -690,12 +701,12 @@ fn subst_roundtrip() {
     let subdir = base.join("src");
     std::fs::create_dir_all(&subdir).unwrap();
 
+    let letter =
+        find_unused_drive_letter().expect("no unused drive letter available for subst test");
     let mut guard = WinEnvGuard::new();
-    if create_subst('Z', &base).is_err() {
-        return;
-    }
-    guard.track_subst('Z');
-    guard.set_cwd(std::path::Path::new(r"Z:\"));
+    create_subst(letter, &base).expect("subst");
+    guard.track_subst(letter);
+    guard.set_cwd(std::path::Path::new(&format!("{letter}:\\")));
 
     let ctx = LogicalPathContext::detect();
     let canonical = subdir;
