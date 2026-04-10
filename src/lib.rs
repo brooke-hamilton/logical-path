@@ -447,7 +447,13 @@ fn find_divergence_point(canonical: &Path, logical: &Path) -> Option<(PathBuf, P
     }
 
     if common_suffix_len == 0 {
-        return None;
+        // No common suffix — the entire paths form the mapping.
+        // This happens on Windows when CWD is exactly at the mapping point
+        // (e.g., junction root, subst drive root, directory symlink root).
+        if canonical == logical {
+            return None;
+        }
+        return Some((canonical.to_path_buf(), logical.to_path_buf()));
     }
 
     let canonical_prefix_len = canonical_components.len() - common_suffix_len;
@@ -1093,11 +1099,13 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn detect_from_cwd_different_paths_no_common_suffix() {
+        // When paths share no common suffix (e.g., subst drive root mapped to
+        // a deep physical path), the entire paths form the prefix mapping.
         let ctx = LogicalPathContext::detect_from_cwd(
             Path::new(r"X:\completely\different"),
             Path::new(r"Y:\totally\unrelated"),
         );
-        assert!(!ctx.has_mapping());
+        assert!(ctx.has_mapping());
     }
 
     // T010a: to_logical with \\?\-prefixed canonical path on Windows
