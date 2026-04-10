@@ -50,7 +50,7 @@
 
 ### Windows Detection Infrastructure
 
-- [x] T007 Write `#[cfg(windows)]` unit tests for `detect_from_cwd(cwd, canonical_cwd)` in src/lib.rs covering: cwd equals canonical_cwd → no mapping, cwd differs from canonical_cwd with common suffix → mapping with correct prefix pair, cwd differs with no common suffix → no mapping
+- [x] T007 Write `#[cfg(windows)]` unit tests for `detect_from_cwd(cwd, canonical_cwd)` in src/lib.rs covering: cwd equals canonical_cwd → no mapping, cwd differs from canonical_cwd with common suffix → mapping with correct prefix pair, cwd differs with no common suffix → full-path mapping
 - [x] T008 Implement `detect_from_cwd(cwd: &Path, canonical_cwd: &Path) -> LogicalPathContext` as a `#[cfg(windows)] pub(crate)` method on `LogicalPathContext` in src/lib.rs that calls `find_divergence_point()` and returns the prefix mapping
 - [x] T009 Replace the no-op `#[cfg(windows)]` body of `detect()` in src/lib.rs with: call `current_dir()`, call `canonicalize()` on the result, apply `strip_extended_length_prefix()`, then delegate to `detect_from_cwd()`
 - [x] T010 Update the `translate()` method in src/lib.rs to apply `strip_extended_length_prefix()` to both `original_canonical` and `translated_canonical` on Windows (`#[cfg(windows)]`) before the round-trip comparison

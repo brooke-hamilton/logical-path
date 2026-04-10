@@ -110,7 +110,7 @@ Internal testability helper for Windows (analogous to existing `detect_from` on 
 ## Validation Rules
 
 - `strip_extended_length_prefix` must never fail — returns input unchanged for unrecognized patterns
-- `find_divergence_point` returns `None` when paths are identical, have no common suffix, or have equal prefixes
+- `find_divergence_point` returns `None` when paths are identical or when the computed prefixes are equal; if the paths have no common suffix, it returns `Some((canonical, logical))` using the full input paths to support junction/subst roots
 - Round-trip validation in `translate()` must apply `\\?\` stripping to canonicalized results on Windows before comparison
 - Case-insensitive comparison applies only to suffix-matching during divergence detection and round-trip validation on Windows, not to the returned path values (which preserve original casing)
 
