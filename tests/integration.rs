@@ -9,6 +9,13 @@ use logical_path::LogicalPathContext;
 #[cfg(unix)]
 static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serializes Windows tests that mutate process-global state (CWD, junctions, subst drives).
+///
+/// Windows tests acquire this lock via `WinEnvGuard::new()` before touching CWD or
+/// creating/removing OS-level path indirections, so they never run concurrently.
+#[cfg(windows)]
+static WIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// RAII guard that restores the process working directory and `$PWD` on drop.
 ///
 /// Holds `ENV_MUTEX` for its entire lifetime, serializing all environment mutations
@@ -345,7 +352,12 @@ mod windows_helpers {
     }
 
     /// RAII guard that saves/restores CWD and cleans up junctions/subst drives on drop.
+    ///
+    /// Holds `WIN_ENV_MUTEX` for its entire lifetime, serializing all Windows environment
+    /// mutations within this test binary so that CWD changes and OS-level path indirections
+    /// (junctions, subst drives) do not interfere across concurrently running tests.
     pub struct WinEnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
         saved_dir: PathBuf,
         junctions: Vec<PathBuf>,
         subst_drives: Vec<char>,
@@ -353,7 +365,14 @@ mod windows_helpers {
 
     impl WinEnvGuard {
         pub fn new() -> Self {
+            let lock = super::WIN_ENV_MUTEX.lock().unwrap_or_else(|e| {
+                eprintln!(
+                    "WinEnvGuard: recovering poisoned WIN_ENV_MUTEX after a previous test panic"
+                );
+                e.into_inner()
+            });
             WinEnvGuard {
+                _lock: lock,
                 saved_dir: std::env::current_dir().expect("current_dir"),
                 junctions: Vec::new(),
                 subst_drives: Vec::new(),

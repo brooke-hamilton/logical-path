@@ -307,14 +307,19 @@ impl LogicalPathContext {
             }
         };
 
-        // On Windows, strip \\?\ prefix from the input path before prefix matching
+        // On Windows, strip the \\?\ prefix only for prefix matching.
+        // Keep the original `path` and `fallback` unchanged so callers get
+        // back the exact input on no-op paths, and so any later operations
+        // in this function can still use the original path.
         #[cfg(windows)]
-        let path = &strip_extended_length_prefix(path);
+        let path_for_match_buf = strip_extended_length_prefix(path);
         #[cfg(windows)]
-        let fallback = path.to_path_buf();
+        let path_for_match = path_for_match_buf.as_path();
+        #[cfg(not(windows))]
+        let path_for_match = path;
 
         // Path must start with the source prefix
-        let suffix = match path.strip_prefix(from_prefix) {
+        let suffix = match path_for_match.strip_prefix(from_prefix) {
             Ok(s) => s,
             Err(_) => {
                 log::trace!(

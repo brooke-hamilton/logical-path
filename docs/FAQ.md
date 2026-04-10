@@ -93,7 +93,7 @@ On **Windows**, the crate uses ordinal case-insensitive comparison (`OsStr::eq_i
 
 ### Does it work on Windows?
 
-Yes. The crate detects NTFS junctions, directory symlinks (`mklink /D`), `subst` drives, and mapped network drives on Windows. Detection compares `current_dir()` (which preserves indirections) against `canonicalize()` (which resolves to the physical path, with the `\?\` prefix stripped). Path comparison on Windows is ordinal case-insensitive, matching NTFS behavior.
+Yes. The crate detects NTFS junctions, directory symlinks (`mklink /D`), `subst` drives, and mapped network drives on Windows. Detection compares `current_dir()` (which preserves indirections) against `canonicalize()` (which resolves to the physical path, with the `\\?\` prefix stripped). Path comparison on Windows is ordinal case-insensitive, matching NTFS behavior.
 
 See [Platform Behavior — Windows](platform-behavior.md#windows) for details.
 

@@ -96,7 +96,9 @@ On Windows, `current_dir()` is maintained by the OS, not by a shell variable. It
 | `net use Z: \\server\share` | `Z:\folder` | `\\server\share\folder` | Mapping: `\\server\share` ↔ `Z:\` |
 | No indirections | `C:\Users\dev\project` | `C:\Users\dev\project` | No mapping |
 
-### Case Sensitivity on Windows are case-insensitive but case-preserving. The library uses ordinal case-insensitive comparison (`OsStr::eq_ignore_ascii_case()`) for path component matching during suffix analysis. This ensures that `C:\Workspace` and `C:\workspace` are treated as the same component during divergence detection
+### Case Sensitivity
+
+Windows paths are case-insensitive but case-preserving. The library uses ordinal case-insensitive comparison (`OsStr::eq_ignore_ascii_case()`) for path component matching during suffix analysis. This ensures that `C:\Workspace` and `C:\workspace` are treated as the same component during divergence detection.
 
 The returned path values preserve the original casing from their source — the library never modifies casing in translated paths.
 
