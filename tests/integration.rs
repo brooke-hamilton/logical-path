@@ -368,6 +368,14 @@ mod windows_helpers {
             self.subst_drives.push(letter);
         }
 
+        pub fn untrack_junction(&mut self, link: &PathBuf) {
+            self.junctions.retain(|j| j != link);
+        }
+
+        pub fn untrack_subst(&mut self, letter: char) {
+            self.subst_drives.retain(|&d| d != letter);
+        }
+
         pub fn set_cwd(&self, dir: &Path) {
             std::env::set_current_dir(dir).expect("set_current_dir");
         }
@@ -475,7 +483,7 @@ fn detect_junction_removed_fallback() {
     // Move CWD away so junction can be removed
     guard.set_cwd(&base);
     remove_junction(&link_dir).expect("remove junction");
-    guard.junctions.retain(|j| j != &link_dir);
+    guard.untrack_junction(&link_dir);
 
     // to_logical should fall back since round-trip validation fails
     let canonical = real_dir.join("src");
@@ -630,7 +638,7 @@ fn subst_removed_fallback() {
     // Move CWD away and remove subst
     guard.set_cwd(&base);
     let _ = remove_subst('Z');
-    guard.subst_drives.retain(|&d| d != 'Z');
+    guard.untrack_subst('Z');
 
     let result = ctx.to_logical(&subdir);
     assert_eq!(result, subdir);

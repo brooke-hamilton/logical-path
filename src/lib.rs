@@ -36,6 +36,7 @@
 //!   The `\\?\` Extended Length Path prefix returned by `canonicalize()` is
 //!   stripped before comparison.
 
+#[cfg(not(windows))]
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
