@@ -427,9 +427,11 @@ fn components_equal(a: &std::path::Component<'_>, b: &std::path::Component<'_>) 
 /// Find the divergence point between a canonical path and a logical path
 /// by comparing path components from the end (longest common suffix).
 ///
-/// Returns `Some((canonical_prefix, logical_prefix))` if the paths share a
-/// common suffix but differ in their prefixes. Returns `None` if the paths
-/// are identical or share no common suffix components.
+/// Returns `Some((canonical_prefix, logical_prefix))` if the paths differ.
+/// When the paths share a common suffix, returns the differing prefixes.
+/// When no common suffix exists, returns the full paths as the mapping
+/// (supporting cases where CWD is exactly at the mapping point).
+/// Returns `None` if the paths are identical.
 fn find_divergence_point(canonical: &Path, logical: &Path) -> Option<(PathBuf, PathBuf)> {
     let canonical_components: Vec<_> = canonical.components().collect();
     let logical_components: Vec<_> = logical.components().collect();
@@ -542,9 +544,15 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn divergence_no_common_components_returns_none() {
+    fn divergence_no_common_components_returns_full_paths() {
+        // When paths share no common suffix, the entire paths form the mapping.
+        // This supports cases where CWD is exactly at the mapping point
+        // (e.g., a symlink root on Unix or a junction root on Windows).
         let result = find_divergence_point(Path::new("/a/b/c"), Path::new("/x/y/z"));
-        assert_eq!(result, None);
+        assert_eq!(
+            result,
+            Some((PathBuf::from("/a/b/c"), PathBuf::from("/x/y/z")))
+        );
     }
 
     #[cfg(unix)]
