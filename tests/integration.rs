@@ -263,6 +263,21 @@ mod windows_helpers {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
+    /// Strip the `\\?\` extended-length path prefix that `canonicalize()` adds
+    /// on Windows, so test paths match the regular DOS-style paths that
+    /// `detect()` stores in its mapping.
+    pub fn strip_extended_prefix(p: PathBuf) -> PathBuf {
+        let s = match p.to_str() {
+            Some(s) => s,
+            None => return p,
+        };
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            PathBuf::from(rest)
+        } else {
+            p
+        }
+    }
+
     /// Create an NTFS junction from `link` to `target` via `cmd /c mklink /J`.
     pub fn create_junction(link: &Path, target: &Path) -> std::io::Result<()> {
         let output = Command::new("cmd")
@@ -423,7 +438,7 @@ fn detect_junction_has_mapping() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("link");
 
@@ -445,7 +460,7 @@ fn detect_junction_to_logical() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("link");
     let subdir = real_dir.join("src");
@@ -467,15 +482,16 @@ fn detect_junction_to_logical() {
 #[cfg(windows)]
 #[test]
 fn detect_no_junction_no_mapping() {
+    use windows_helpers::*;
+
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
-    std::env::set_current_dir(&base).expect("set_current_dir");
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
+
+    let guard = WinEnvGuard::new();
+    guard.set_cwd(&base);
 
     let ctx = LogicalPathContext::detect();
     assert!(!ctx.has_mapping());
-
-    // Restore CWD
-    let _ = std::env::set_current_dir(std::env::temp_dir());
 }
 
 // T016: Junction removed after detect → fallback
@@ -485,7 +501,7 @@ fn detect_junction_removed_fallback() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("link");
     let subdir = real_dir.join("src");
@@ -517,7 +533,7 @@ fn detect_dir_symlink_has_mapping() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("symlink");
 
@@ -547,7 +563,7 @@ fn junction_roundtrip() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("link");
     let subdir = real_dir.join("src");
@@ -575,7 +591,7 @@ fn detect_subst_has_mapping() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
 
     let mut guard = WinEnvGuard::new();
     // Use Z: as the subst drive letter
@@ -596,7 +612,7 @@ fn detect_subst_to_logical() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let subdir = base.join("src");
     std::fs::create_dir_all(&subdir).unwrap();
 
@@ -620,7 +636,7 @@ fn subst_to_logical_outside_mapping() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
 
     let mut guard = WinEnvGuard::new();
     if create_subst('Z', &base).is_err() {
@@ -641,7 +657,7 @@ fn subst_removed_fallback() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let subdir = base.join("src");
     std::fs::create_dir_all(&subdir).unwrap();
 
@@ -670,7 +686,7 @@ fn subst_roundtrip() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let subdir = base.join("src");
     std::fs::create_dir_all(&subdir).unwrap();
 
@@ -697,7 +713,7 @@ fn junction_retarget_fallback() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir1 = base.join("real1");
     let real_dir2 = base.join("real2");
     let link_dir = base.join("link");
@@ -733,7 +749,7 @@ fn junction_to_canonical() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("link");
     let subdir = real_dir.join("src");
@@ -758,7 +774,7 @@ fn junction_to_canonical_outside_prefix() {
     use windows_helpers::*;
 
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
     let real_dir = base.join("real");
     let link_dir = base.join("link");
 
@@ -778,13 +794,15 @@ fn junction_to_canonical_outside_prefix() {
 #[cfg(windows)]
 #[test]
 fn no_mapping_to_canonical_unchanged() {
+    use windows_helpers::*;
+
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
-    std::env::set_current_dir(&base).expect("set_current_dir");
+    let base = strip_extended_prefix(std::fs::canonicalize(dir.path()).unwrap());
+
+    let guard = WinEnvGuard::new();
+    guard.set_cwd(&base);
 
     let ctx = LogicalPathContext::detect();
     let input = std::path::Path::new(r"C:\Users\dev\project\src\main.rs");
     assert_eq!(ctx.to_canonical(input), input.to_path_buf());
-
-    let _ = std::env::set_current_dir(std::env::temp_dir());
 }
