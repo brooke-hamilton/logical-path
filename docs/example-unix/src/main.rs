@@ -81,7 +81,13 @@ fn fixed_cd_demo() {
             "                   CORRECT! This preserves your symlink-based directory structure."
         );
     } else {
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                eprintln!("Error: could not determine current directory: {e}");
+                return;
+            }
+        };
         println!("No mapping active — to_logical() returns the input path unchanged.");
         println!("The tool emits: cd {}", cwd.display());
     }
