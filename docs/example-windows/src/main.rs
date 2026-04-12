@@ -86,8 +86,15 @@ fn fixed_cd_demo() {
         println!("Using LogicalPathContext::detect() + to_logical():");
         println!();
 
-        let canonical_cwd = match std::fs::canonicalize(std::env::current_dir().unwrap_or_default())
-        {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                eprintln!("Error: could not determine current directory: {e}");
+                return;
+            }
+        };
+
+        let canonical_cwd = match std::fs::canonicalize(&cwd) {
             Ok(c) => strip_extended_prefix(&c),
             Err(e) => {
                 eprintln!("Error: could not canonicalize current directory: {e}");
