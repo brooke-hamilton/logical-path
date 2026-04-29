@@ -30,3 +30,6 @@ target
 Thumbs.db
 *.swp
 *.tmp
+
+# Copilot working files
+.copilot-tracking/
