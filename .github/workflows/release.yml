@@ -31,8 +31,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # Check out the exact commit that CI verified, not the latest main.
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # release-plz needs to be on a branch (not detached HEAD) to determine
+          # what to release, so we check out the branch HEAD rather than the
+          # exact SHA that CI verified. The narrow race window (another commit
+          # landing on main between CI completion and this job starting) is
+          # acceptable because release-plz is idempotent: if the version in
+          # Cargo.toml is already on crates.io, it does nothing.
+          ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
           persist-credentials: false
 
