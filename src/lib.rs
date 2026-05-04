@@ -1182,4 +1182,35 @@ mod tests {
         assert_eq!(ctx.to_logical(input), input.to_path_buf());
         assert_eq!(ctx.to_canonical(input), input.to_path_buf());
     }
+
+    // Pins current behavior: Windows component comparison uses
+    // `eq_ignore_ascii_case`, so non-ASCII letters that differ only in case
+    // (e.g., `Ä` vs `ä`) are treated as distinct components. If this is ever
+    // changed to full Unicode case folding, this test will fail and force a
+    // deliberate update.
+    #[cfg(windows)]
+    #[test]
+    fn divergence_non_ascii_case_is_not_folded() {
+        let result = find_divergence_point(
+            Path::new(r"C:\Users\Ä\project"),
+            Path::new(r"C:\Users\ä\project"),
+        );
+        // Common ASCII suffix is just `project`; the non-ASCII components
+        // differ under ASCII-only case folding, so they form the divergence.
+        assert_eq!(
+            result,
+            Some((PathBuf::from(r"C:\Users\Ä"), PathBuf::from(r"C:\Users\ä"),))
+        );
+    }
+
+    // Pins current behavior: `\\?\Volume{GUID}\...` paths are not stripped
+    // because the prefix is followed by `V` then `o`, not a drive letter and
+    // colon. Such paths flow through unchanged.
+    #[cfg(windows)]
+    #[test]
+    fn strip_prefix_volume_guid_unchanged() {
+        let input = r"\\?\Volume{12345678-1234-1234-1234-123456789abc}\Users\dev";
+        let result = strip_extended_length_prefix(Path::new(input));
+        assert_eq!(result, PathBuf::from(input));
+    }
 }
