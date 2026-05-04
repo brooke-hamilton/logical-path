@@ -9,6 +9,10 @@
 //! indirection) and the **canonical** path (with all indirections resolved).
 //! This crate detects that mapping and provides bidirectional translation.
 //!
+//! The primary entry point is [`LogicalPathContext::detect()`], which inspects
+//! the process environment and returns a context for translating paths in both
+//! directions.
+//!
 //! # Quick Start
 //!
 //! ```no_run
@@ -26,15 +30,11 @@
 //!
 //! # Platform Behavior
 //!
-//! - **Linux/macOS**: Reads `$PWD` and compares against `getcwd()` to detect
-//!   symlink prefix mappings.
-//! - **macOS**: System symlinks like `/var` → `/private/var` are handled
-//!   automatically by the generic suffix-matching algorithm.
-//! - **Windows**: Compares `current_dir()` (preserves junctions, subst drives)
-//!   against `canonicalize()` (resolves to physical path) to detect NTFS
-//!   junction, directory symlink, subst drive, and mapped drive mappings.
-//!   The `\\?\` Extended Length Path prefix returned by `canonicalize()` is
-//!   stripped before comparison.
+//! - **Linux/macOS**: Compares `$PWD` against `getcwd()`.
+//! - **Windows**: Compares `current_dir()` against `canonicalize()` with
+//!   `\\?\` prefix stripped.
+//!
+//! See [`LogicalPathContext`] for full platform-specific details.
 
 #[cfg(not(windows))]
 use std::ffi::OsStr;
@@ -73,8 +73,9 @@ struct PrefixMapping {
 impl Default for LogicalPathContext {
     /// Returns a context with no active mapping.
     ///
-    /// Equivalent to calling `detect()` in an environment with no symlinks
-    /// in effect. All translations return their input unchanged.
+    /// Equivalent to calling [`detect()`](LogicalPathContext::detect) in an
+    /// environment with no symlinks in effect. All translations return their
+    /// input unchanged.
     fn default() -> Self {
         LogicalPathContext { mapping: None }
     }
@@ -89,15 +90,30 @@ impl LogicalPathContext {
     ///   against `canonicalize(current_dir())` (canonical, physical path) with
     ///   `\\?\` prefix stripped.
     ///
-    /// Returns a context with no active mapping when:
+    /// Returns a context with no active mapping (all translations become
+    /// no-ops) when:
     /// - `$PWD` is unset (Unix)
     /// - The logical and canonical CWD are identical (no indirection in effect)
     /// - `$PWD` is stale (Unix: points to a non-existent directory)
     /// - The current directory cannot be determined
     ///
+    /// This function is infallible — detection failures are handled by
+    /// returning a no-op context.
+    ///
     /// # Panics
     ///
     /// This function never panics.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use logical_path::LogicalPathContext;
+    ///
+    /// let ctx = LogicalPathContext::detect();
+    /// if ctx.has_mapping() {
+    ///     println!("Symlink mapping detected");
+    /// }
+    /// ```
     #[must_use]
     pub fn detect() -> LogicalPathContext {
         #[cfg(windows)]
@@ -231,6 +247,19 @@ impl LogicalPathContext {
     /// When this returns `false`, [`to_logical()`](Self::to_logical) and
     /// [`to_canonical()`](Self::to_canonical) will always return their input
     /// unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use logical_path::LogicalPathContext;
+    ///
+    /// let ctx = LogicalPathContext::detect();
+    /// if ctx.has_mapping() {
+    ///     println!("Will translate paths");
+    /// } else {
+    ///     println!("No symlink mapping — paths returned unchanged");
+    /// }
+    /// ```
     #[must_use]
     pub fn has_mapping(&self) -> bool {
         self.mapping.is_some()
@@ -254,6 +283,19 @@ impl LogicalPathContext {
     /// # Panics
     ///
     /// This function never panics, even with non-UTF-8 path components.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use logical_path::LogicalPathContext;
+    /// use std::path::Path;
+    ///
+    /// let ctx = LogicalPathContext::detect();
+    /// let canonical = Path::new("/mnt/wsl/workspace/project/src/main.rs");
+    /// let logical = ctx.to_logical(canonical);
+    /// // Display the logical path to the user
+    /// println!("{}", logical.display());
+    /// ```
     #[must_use]
     pub fn to_logical(&self, path: &Path) -> PathBuf {
         self.translate(path, TranslationDirection::ToLogical)
@@ -277,6 +319,21 @@ impl LogicalPathContext {
     /// # Panics
     ///
     /// This function never panics, even with non-UTF-8 path components.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use logical_path::LogicalPathContext;
+    /// use std::path::Path;
+    ///
+    /// let ctx = LogicalPathContext::detect();
+    /// let logical = Path::new("/workspace/project/src/main.rs");
+    /// let canonical = ctx.to_canonical(logical);
+    /// // Use the canonical path for filesystem operations
+    /// if canonical.exists() {
+    ///     println!("File exists at {}", canonical.display());
+    /// }
+    /// ```
     #[must_use]
     pub fn to_canonical(&self, path: &Path) -> PathBuf {
         self.translate(path, TranslationDirection::ToCanonical)
