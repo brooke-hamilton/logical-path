@@ -9,6 +9,7 @@ license = "MIT"
 readme = "README.md"
 keywords = ["symlink", "path", "canonical", "logical", "pwd"]
 categories = ["filesystem", "command-line-utilities"]
+exclude = [".devcontainer/", ".github/", "Makefile"]
 
 [dependencies]
 log = "0.4"
