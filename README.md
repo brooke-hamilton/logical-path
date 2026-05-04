@@ -1,7 +1,7 @@
 # logical-path
 
 [![Crates.io](https://img.shields.io/crates/v/logical-path.svg)](https://crates.io/crates/logical-path)
-![Crates.io Version](https://img.shields.io/crates/v/:logical-path)
+![Crates.io Version](https://img.shields.io/crates/v/logical-path)
 ![docs.rs](https://img.shields.io/docsrs/logical-path)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/brooke-hamilton/logical-path/actions/workflows/ci.yml/badge.svg)](https://github.com/brooke-hamilton/logical-path/actions/workflows/ci.yml)
