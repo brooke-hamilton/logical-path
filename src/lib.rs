@@ -74,8 +74,8 @@ impl Default for LogicalPathContext {
     /// Returns a context with no active mapping.
     ///
     /// Equivalent to calling [`detect()`](LogicalPathContext::detect) in an
-    /// environment with no symlinks in effect. All translations return their
-    /// input unchanged.
+    /// environment with no path indirections or mappings in effect. All
+    /// translations return their input unchanged.
     fn default() -> Self {
         LogicalPathContext { mapping: None }
     }
@@ -111,7 +111,7 @@ impl LogicalPathContext {
     ///
     /// let ctx = LogicalPathContext::detect();
     /// if ctx.has_mapping() {
-    ///     println!("Symlink mapping detected");
+    ///     println!("Path mapping detected");
     /// }
     /// ```
     #[must_use]
@@ -257,7 +257,7 @@ impl LogicalPathContext {
     /// if ctx.has_mapping() {
     ///     println!("Will translate paths");
     /// } else {
-    ///     println!("No symlink mapping — paths returned unchanged");
+    ///     println!("No path mapping detected — paths returned unchanged");
     /// }
     /// ```
     #[must_use]
