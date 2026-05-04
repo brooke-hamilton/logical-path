@@ -1,0 +1,22 @@
+# Release-plz configuration
+# Docs: https://release-plz.dev/docs/config
+#
+# This project does not use Conventional Commits. Releases are driven entirely
+# by manually editing the `version` field in Cargo.toml. When a commit lands on
+# `main` whose version is not yet on crates.io, release-plz publishes it,
+# creates a `vX.Y.Z` git tag, and opens a GitHub Release.
+
+[workspace]
+# Skip changelog generation (we don't use Conventional Commits).
+changelog_update = false
+
+# Don't open a "release PR" — we bump the version by hand in normal PRs.
+# `release` (the publish step) still runs on every push to main and is a no-op
+# unless Cargo.toml has a version that isn't on crates.io yet.
+pr_labels = []
+
+# Run cargo-semver-checks before publishing (this crate is a library).
+semver_check = true
+
+# Cap publish time so a hung run fails fast instead of burning the job timeout.
+publish_timeout = "10m"

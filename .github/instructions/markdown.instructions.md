@@ -39,6 +39,7 @@ Instructions for writing clean, consistent, and accessible Markdown documents ba
 - **MD010**: Use spaces instead of hard tab characters for indentation
 - **MD012**: Avoid multiple consecutive blank lines
 - **MD013**: Line length — **always ignore this rule**. Do not enforce or warn on line length
+- **No hard wrapping**: Do not hard-wrap prose in Markdown files. Each paragraph should be a single continuous line; let the renderer handle line wrapping. Hard line breaks are only acceptable inside code blocks, tables, and lists where they are syntactically meaningful
 - **MD047**: End files with a single newline character
 
 ## Code Blocks

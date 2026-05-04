@@ -1,0 +1,50 @@
+name: Release
+
+# Run only after the CI workflow succeeds on main. This ensures that a release
+# is never published from a commit that failed tests, lints, or the
+# cross-platform matrix in ci.yml.
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-plz:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    # Only release if the upstream CI run succeeded.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: write       # create git tag and GitHub Release
+      pull-requests: read   # release-plz reads PRs to build release notes
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Check out the exact commit that CI verified, not the latest main.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable branch HEAD as of 2026-02-13
+        with:
+          toolchain: stable
+
+      - name: Run release-plz
+        uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
