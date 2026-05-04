@@ -1183,7 +1183,7 @@ mod tests {
         assert_eq!(ctx.to_canonical(input), input.to_path_buf());
     }
 
-    // Pins current behaviour: Windows component comparison uses
+    // Pins current behavior: Windows component comparison uses
     // `eq_ignore_ascii_case`, so non-ASCII letters that differ only in case
     // (e.g., `Ä` vs `ä`) are treated as distinct components. If this is ever
     // changed to full Unicode case folding, this test will fail and force a
@@ -1203,7 +1203,7 @@ mod tests {
         );
     }
 
-    // Pins current behaviour: `\\?\Volume{GUID}\...` paths are not stripped
+    // Pins current behavior: `\\?\Volume{GUID}\...` paths are not stripped
     // because the prefix is followed by `V` then `o`, not a drive letter and
     // colon. Such paths flow through unchanged.
     #[cfg(windows)]

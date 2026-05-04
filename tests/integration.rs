@@ -20,7 +20,7 @@ static WIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 ///
 /// Holds `ENV_MUTEX` for its entire lifetime, serializing all environment mutations
 /// within this test binary. `set_var`/`remove_var` are `unsafe` in Rust 2024 because
-/// concurrent environment modification is undefined behaviour; holding `ENV_MUTEX`
+/// concurrent environment modification is undefined behavior; holding `ENV_MUTEX`
 /// ensures that no two tests in this binary modify the environment at the same time.
 #[cfg(unix)]
 struct EnvGuard {
